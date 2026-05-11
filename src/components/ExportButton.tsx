@@ -1,0 +1,58 @@
+import { Download } from 'lucide-react';
+import { useLogStore } from '../hooks/useLogStore';
+import { LogEntry } from '../types';
+
+function toCSV(entries: LogEntry[]): string {
+  const escape = (v: string | number | undefined) =>
+    `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const header = [
+    '날짜', '시간', '단어', '막힌음절', '초성',
+    '상황', '결과', '긴장도', '신체상태', '감정상태', '메모',
+  ].map(escape).join(',');
+
+  const rows = entries.map(e =>
+    [
+      e.createdAt.slice(0, 10),
+      e.createdAt.slice(11, 16),
+      e.word,
+      e.blockedSyllable,
+      e.phoneme,
+      e.situations.map(s => s.replace(/_/g, ' ')).join(' / '),
+      e.outcome.replace(/_/g, ' '),
+      e.anxietyScore ?? '',
+      e.physicalState ?? '',
+      e.emotionalState ?? '',
+      e.note ?? '',
+    ].map(escape).join(',')
+  );
+
+  return '﻿' + [header, ...rows].join('\n');
+}
+
+export default function ExportButton() {
+  const { entries } = useLogStore();
+
+  if (entries.length === 0) return null;
+
+  function handleExport() {
+    const blob = new Blob([toCSV(entries)], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `말막힘-일지-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <button
+      onClick={handleExport}
+      title={`${entries.length}개 기록 내보내기`}
+      className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:text-teal-600 hover:bg-teal-50 transition-colors"
+    >
+      <Download size={15} />
+      <span className="hidden sm:inline">내보내기</span>
+    </button>
+  );
+}
