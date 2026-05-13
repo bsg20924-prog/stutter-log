@@ -8,7 +8,7 @@ import {
   setDoc, deleteDoc, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { LogEntry, LogStatus, OutcomeTag } from '../types';
+import { LogEntry, LogStatus, OutcomeTag, TacticTag } from '../types';
 
 const SITUATION_MAP: Record<string, LogEntry['situations'][number]> = {
   카페_주문:  '주문/결제',
@@ -28,6 +28,18 @@ const OUTCOME_MAP: Record<string, LogEntry['outcome']> = {
 };
 
 const VALID_STATUSES = new Set<LogStatus>(['avoided', 'blocked', 'overcome']);
+
+const VALID_TACTICS = new Set<TacticTag>([
+  '호흡_조절', '천천히_시작', '첫_음절_늘리기',
+  '리듬_타기', '성공_기억_떠올리기', '다른_단어_우회',
+]);
+
+function sanitizeRating(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 5) return undefined;
+  return n;
+}
 
 function inferStatusFromOutcome(outcome?: OutcomeTag | ''): LogStatus {
   if (
@@ -76,6 +88,14 @@ function migrate(data: Record<string, unknown>): LogEntry {
     ? (rawStatus as LogStatus)
     : inferStatusFromOutcome(outcome);
 
+  const expectedFear = sanitizeRating(data.expectedFear);
+  const actualDifficulty = sanitizeRating(data.actualDifficulty);
+  const tactics: TacticTag[] = Array.isArray(data.tactics)
+    ? (data.tactics as unknown[])
+        .map(t => String(t))
+        .filter(t => VALID_TACTICS.has(t as TacticTag)) as TacticTag[]
+    : [];
+
   return {
     id:              String(data.id ?? ''),
     createdAt:       String(data.createdAt ?? ''),
@@ -89,6 +109,9 @@ function migrate(data: Record<string, unknown>): LogEntry {
     physicalState:   data.physicalState ? String(data.physicalState) : undefined,
     emotionalState:  data.emotionalState ? String(data.emotionalState) : undefined,
     note:            data.note ? String(data.note) : undefined,
+    ...(expectedFear !== undefined ? { expectedFear } : {}),
+    ...(actualDifficulty !== undefined ? { actualDifficulty } : {}),
+    ...(tactics.length > 0 ? { tactics } : {}),
   };
 }
 

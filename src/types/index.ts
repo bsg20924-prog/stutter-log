@@ -1,5 +1,13 @@
 export type LogStatus = 'avoided' | 'blocked' | 'overcome';
 
+export type TacticTag =
+  | '호흡_조절'
+  | '천천히_시작'
+  | '첫_음절_늘리기'
+  | '리듬_타기'
+  | '성공_기억_떠올리기'
+  | '다른_단어_우회';
+
 export type SituationTag =
   | '전화'
   | '주문/결제'
@@ -38,4 +46,7 @@ export interface LogEntry {
   physicalState?: string;
   emotionalState?: string;
   note?: string;
+  expectedFear?: number;
+  actualDifficulty?: number;
+  tactics?: TacticTag[];
 }

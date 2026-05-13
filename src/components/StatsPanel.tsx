@@ -6,7 +6,10 @@ import {
 } from 'recharts';
 import { useLogStore } from '../hooks/useLogStore';
 import { OutcomeTag } from '../types';
-import { getSituationStats, getOutcomeDistribution } from '../utils/analytics';
+import {
+  getSituationStats, getOutcomeDistribution,
+  getFearGapStats, getTacticInsights,
+} from '../utils/analytics';
 import { getZoneFrequency } from '../utils/phonetics';
 import ArticulationMap from './ArticulationMap';
 
@@ -33,9 +36,11 @@ function ChartSection({
 export default function StatsPanel() {
   const { entries } = useLogStore();
 
-  const situationData = useMemo(() => getSituationStats(entries), [entries]);
-  const outcomeRaw    = useMemo(() => getOutcomeDistribution(entries), [entries]);
-  const zoneFreq      = useMemo(
+  const situationData  = useMemo(() => getSituationStats(entries), [entries]);
+  const outcomeRaw     = useMemo(() => getOutcomeDistribution(entries), [entries]);
+  const fearGapStats   = useMemo(() => getFearGapStats(entries), [entries]);
+  const tacticInsights = useMemo(() => getTacticInsights(entries), [entries]);
+  const zoneFreq       = useMemo(
     () => getZoneFrequency(entries.flatMap(e => e.phonemes ?? []).filter(Boolean)),
     [entries]
   );
@@ -142,6 +147,78 @@ export default function StatsPanel() {
         </ChartSection>
       )}
 
+      {/* 심리적 간극 */}
+      <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-1">심리적 간극</h3>
+        {fearGapStats.sampleSize < 3 ? (
+          <p className="text-xs text-gray-400 leading-relaxed">
+            데이터가 더 쌓이면 긴장과 실제 경험의 차이를 볼 수 있습니다.
+            {fearGapStats.sampleSize > 0 && ` (현재 ${fearGapStats.sampleSize}개)`}
+          </p>
+        ) : (
+          <div className="space-y-3 mt-2">
+            <p className="text-xs text-teal-500 mb-3">
+              {fearGapStats.averageFear > fearGapStats.averageDifficulty
+                ? '실제보다 더 크게 긴장했던 경우가 많아요.'
+                : fearGapStats.averageFear < fearGapStats.averageDifficulty
+                ? '예상보다 실제 어려움이 더 컸던 경우가 많아요.'
+                : '예상과 실제가 비슷하게 기록되었어요.'}
+            </p>
+            <FearBar label="말하기 전 긴장도" value={fearGapStats.averageFear} color="bg-orange-300" />
+            <FearBar label="실제 체감 어려움" value={fearGapStats.averageDifficulty} color="bg-teal-300" />
+            <p className="text-xs text-gray-400 mt-1">{fearGapStats.sampleSize}개 기록 기준</p>
+          </div>
+        )}
+      </div>
+
+      {/* 자주 도움된 전략 */}
+      {tacticInsights.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">자주 도움된 전략</h3>
+          <p className="text-xs text-teal-500 mb-3">편안한 흐름과 함께 기록된 전략들이에요.</p>
+          <div className="space-y-3">
+            {tacticInsights.map(t => {
+              const label = t.tactic.replace(/_/g, ' ');
+              const pct = Math.round(t.comfortableRatio * 100);
+              return (
+                <div key={t.tactic}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-700">{label}</span>
+                    <span className="text-xs text-gray-400">{t.usageCount}회 사용</span>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-teal-400 rounded-full transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  {t.comfortableCount > 0 && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      '{label}' 전략은 편안한 흐름과 함께 {t.comfortableCount}번 기록되었습니다.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+function FearBar({ label, value, color }: { label: string; value: number; color: string }) {
+  const pct = Math.round((value / 5) * 100);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-gray-600">{label}</span>
+        <span className="text-xs font-semibold text-gray-700">{value} / 5</span>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }

@@ -15,6 +15,7 @@ function toCSV(entries: LogEntry[]): string {
   const header = [
     '날짜', '시간', '단어', '막힌음절', '초성',
     '상황', '결과', '신체상태', '감정상태', '메모', '상태',
+    '예상 긴장도', '실제 어려움', '사용 전략',
   ].map(escape).join(',');
 
   const rows = entries.map(e =>
@@ -30,6 +31,9 @@ function toCSV(entries: LogEntry[]): string {
       e.emotionalState ?? '',
       e.note ?? '',
       STATUS_LABEL[e.status ?? 'blocked'] ?? '막혔음',
+      e.expectedFear ?? '',
+      e.actualDifficulty ?? '',
+      (e.tactics ?? []).map(t => t.replace(/_/g, ' ')).join('/'),
     ].map(escape).join(',')
   );
 

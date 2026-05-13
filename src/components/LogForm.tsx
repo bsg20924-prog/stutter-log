@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { ChevronDown, Plus, X } from 'lucide-react';
-import { LogEntry, SituationTag, OutcomeTag, LogStatus } from '../types';
+import { LogEntry, SituationTag, OutcomeTag, LogStatus, TacticTag } from '../types';
 import { decomposeSyllable } from '../utils/korean';
 
 const SITUATION_OPTIONS: { value: SituationTag; label: string }[] = [
@@ -29,6 +29,15 @@ const OUTCOME_OPTIONS: {
   { value: '상대가_대신_말함',     label: '상대가 대신 말함',     dot: 'bg-red-400',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-50 text-red-700 border border-red-300 font-medium' },
   { value: '중간에_포기함',        label: '중간에 포기함',        dot: 'bg-red-400',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-50 text-red-700 border border-red-300 font-medium' },
   { value: '아예_회피함',          label: '아예 회피함',          dot: 'bg-red-600',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-100 text-red-800 border border-red-400 font-semibold' },
+];
+
+const TACTIC_OPTIONS: { value: TacticTag; label: string }[] = [
+  { value: '호흡_조절',           label: '호흡 조절' },
+  { value: '천천히_시작',         label: '천천히 시작' },
+  { value: '첫_음절_늘리기',      label: '첫 음절 늘리기' },
+  { value: '리듬_타기',           label: '리듬 타기' },
+  { value: '성공_기억_떠올리기',  label: '성공 기억 떠올리기' },
+  { value: '다른_단어_우회',      label: '다른 단어 우회' },
 ];
 
 const STATUS_OPTIONS: { value: LogStatus; label: string; activeClass: string }[] = [
@@ -79,6 +88,9 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
         }
       : INITIAL_DETAIL
   );
+  const [expectedFear, setExpectedFear] = useState<number | undefined>(initialValues?.expectedFear);
+  const [actualDifficulty, setActualDifficulty] = useState<number | undefined>(initialValues?.actualDifficulty);
+  const [tactics, setTactics] = useState<TacticTag[]>(initialValues?.tactics ?? []);
 
   const components = decomposeSyllable(syllableInput);
 
@@ -122,7 +134,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   }
 
   function buildEntry(isQuick: boolean): Omit<LogEntry, 'id' | 'createdAt'> {
-    return {
+    const base: Omit<LogEntry, 'id' | 'createdAt'> = {
       word: word.trim(),
       blockedSyllables: pairs.map(p => p.syllable),
       phonemes: pairs.map(p => p.phoneme),
@@ -133,6 +145,13 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
       physicalState:  showDetail && !isQuick && detail.physicalState.trim() ? detail.physicalState.trim() : undefined,
       emotionalState: showDetail && !isQuick && detail.emotionalState.trim() ? detail.emotionalState.trim() : undefined,
       note:           showDetail && !isQuick && detail.note.trim() ? detail.note.trim() : undefined,
+    };
+    if (!showDetail || isQuick) return base;
+    return {
+      ...base,
+      ...(expectedFear !== undefined ? { expectedFear } : {}),
+      ...(status !== 'avoided' && actualDifficulty !== undefined ? { actualDifficulty } : {}),
+      ...(tactics.length > 0 ? { tactics } : {}),
     };
   }
 
@@ -146,6 +165,9 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
     setOutcome('');
     setShowDetail(false);
     setDetail(INITIAL_DETAIL);
+    setExpectedFear(undefined);
+    setActualDifficulty(undefined);
+    setTactics([]);
   }
 
   async function handleQuickSave() {
@@ -377,6 +399,54 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
               className={inputCls}
             />
           </div>
+          {/* 예상 긴장 vs 실제 어려움 */}
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-600">
+              예상했던 긴장 vs 실제 어려움 <span className="text-gray-400 font-normal">(선택)</span>
+            </label>
+            <RatingChips
+              label="말하기 전 긴장도"
+              value={expectedFear}
+              onChange={setExpectedFear}
+            />
+            {status !== 'avoided' && (
+              <RatingChips
+                label="실제 체감 어려움"
+                value={actualDifficulty}
+                onChange={setActualDifficulty}
+              />
+            )}
+          </div>
+
+          {/* 전략 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-2">
+              어떤 방법을 시도했나요? <span className="text-gray-400 font-normal">(선택)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {TACTIC_OPTIONS.map(opt => {
+                const selected = tactics.includes(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() =>
+                      setTactics(prev =>
+                        selected ? prev.filter(t => t !== opt.value) : [...prev, opt.value]
+                      )
+                    }
+                    className={[
+                      'rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                      selected ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-500',
+                    ].join(' ')}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1.5">
               메모 <span className="text-gray-400 font-normal">(선택)</span>
@@ -417,6 +487,37 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
       </div>
 
     </form>
+  );
+}
+
+function RatingChips({
+  value, onChange, label,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  label: string;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-gray-500 mb-1.5">{label}</p>
+      <div className="flex gap-1.5">
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(value === n ? undefined : n)}
+            className={[
+              'w-9 h-9 rounded-xl text-sm font-semibold transition-all duration-150',
+              value === n
+                ? 'bg-teal-500 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+            ].join(' ')}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
