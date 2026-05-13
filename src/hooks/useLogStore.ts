@@ -97,15 +97,27 @@ export function LogStoreProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsub: (() => void) | null = null;
+
     migrateFromLocalStorage().then(() => {
       const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'));
-      const unsub = onSnapshot(q, (snapshot) => {
-        const docs = snapshot.docs.map(d => migrate({ ...d.data(), id: d.id }));
-        setEntries(docs);
-        setLoading(false);
-      });
-      return unsub;
+      unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const docs = snapshot.docs.map(d => migrate({ ...d.data(), id: d.id }));
+          setEntries(docs);
+          setLoading(false);
+        },
+        () => {
+          // Firestore 오류 시 로딩 해제 — 빈 상태로 폼은 정상 노출
+          setLoading(false);
+        },
+      );
+    }).catch(() => {
+      setLoading(false);
     });
+
+    return () => { unsub?.(); };
   }, []);
 
   const addEntry = useCallback(async (entry: Omit<LogEntry, 'id' | 'createdAt'>): Promise<LogEntry> => {

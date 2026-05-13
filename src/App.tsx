@@ -23,9 +23,9 @@ function AppShell() {
   const [activeTab, setActiveTab] = useState<Tab>('record');
   const { addEntry, loading } = useLogStore();
 
-  function handleAdd(entry: Omit<LogEntry, 'id' | 'createdAt'>) {
-    addEntry(entry);
-    setActiveTab('log'); // 저장 후 로그 탭으로 자동 이동
+  async function handleAdd(entry: Omit<LogEntry, 'id' | 'createdAt'>) {
+    await addEntry(entry);
+    setActiveTab('log');
   }
 
   const today = format(new Date(), 'M월 d일 (EEEE)', { locale: ko });

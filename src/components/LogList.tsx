@@ -182,6 +182,7 @@ function EntryCard({
 // ── 메인 컴포넌트 ──────────────────────────────────────────
 export default function LogList() {
   const { entries, deleteEntry, updateEntry } = useLogStore();
+  const handleDelete = async (id: string) => { await deleteEntry(id); };
   const [editingId, setEditingId] = useState<string | null>(null);
   const grouped = useMemo(() => groupByDate(entries), [entries]);
 
@@ -210,8 +211,8 @@ export default function LogList() {
                   <p className="text-xs font-semibold text-teal-500 mb-4">기록 수정 중</p>
                   <LogForm
                     initialValues={entry}
-                    onSubmit={updates => {
-                      updateEntry(entry.id, updates);
+                    onSubmit={async updates => {
+                      await updateEntry(entry.id, updates);
                       setEditingId(null);
                     }}
                     onCancel={() => setEditingId(null)}
@@ -221,7 +222,7 @@ export default function LogList() {
                 <EntryCard
                   key={entry.id}
                   entry={entry}
-                  onDelete={deleteEntry}
+                  onDelete={handleDelete}
                   onEditStart={setEditingId}
                 />
               )
