@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ClipboardPen, ScrollText, Lightbulb } from 'lucide-react';
+import { ClipboardPen, ScrollText, Lightbulb, Target } from 'lucide-react';
 import { LogStoreProvider, useLogStore } from './hooks/useLogStore';
 import { LogEntry } from './types';
 import LogForm from './components/LogForm';
@@ -9,14 +9,16 @@ import LogList from './components/LogList';
 import StatsPanel from './components/StatsPanel';
 import ExportButton from './components/ExportButton';
 import QuickLogInput from './components/QuickLogInput';
+import ChallengeList from './components/ChallengeList';
 import './index.css';
 
-type Tab = 'record' | 'log' | 'stats';
+type Tab = 'record' | 'log' | 'challenge' | 'stats';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'record', label: '기록하기', icon: <ClipboardPen size={22} /> },
-  { id: 'log',    label: '나의 기록', icon: <ScrollText size={22} /> },
-  { id: 'stats',  label: '인사이트',  icon: <Lightbulb size={22} /> },
+  { id: 'record',    label: '기록하기',  icon: <ClipboardPen size={22} /> },
+  { id: 'log',       label: '나의 기록', icon: <ScrollText size={22} /> },
+  { id: 'challenge', label: '도전 단어', icon: <Target size={22} /> },
+  { id: 'stats',     label: '인사이트',  icon: <Lightbulb size={22} /> },
 ];
 
 // Provider 안에서 실제 앱 렌더링 (useLogStore 사용 가능)
@@ -63,8 +65,9 @@ function AppShell() {
               </div>
             </div>
           )}
-          {activeTab === 'log'    && <LogList />}
-          {activeTab === 'stats'  && <StatsPanel />}
+          {activeTab === 'log'       && <LogList />}
+          {activeTab === 'challenge' && <ChallengeList />}
+          {activeTab === 'stats'     && <StatsPanel />}
         </div>
       </main>
 
