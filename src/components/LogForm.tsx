@@ -85,8 +85,6 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   const isQuickValid = word.trim() !== '';
   const isFullValid =
     isQuickValid &&
-    pairs.length > 0 &&
-    pairs.every(p => p.phoneme !== '') &&
     situations.length > 0 &&
     outcome !== '';
 
@@ -105,6 +103,22 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
     setSituations(prev =>
       prev.includes(tag) ? prev.filter(s => s !== tag) : [...prev, tag]
     );
+  }
+
+  const AVOID_OUTCOMES = new Set<OutcomeTag>(['아예_회피함', '중간에_포기함', '상대가_대신_말함']);
+
+  function handleStatusChange(newStatus: LogStatus) {
+    setStatus(newStatus);
+    if (newStatus === 'overcome') setOutcome('그대로_자연스럽게');
+    else if (newStatus === 'avoided') setOutcome('아예_회피함');
+    // 'blocked'는 결과를 건드리지 않음 — 기존 선택값 유지
+  }
+
+  function handleOutcomeChange(value: OutcomeTag) {
+    setOutcome(value);
+    if (AVOID_OUTCOMES.has(value)) setStatus('avoided');
+    else if (value === '그대로_자연스럽게') setStatus('overcome');
+    else setStatus('blocked');
   }
 
   function buildEntry(isQuick: boolean): Omit<LogEntry, 'id' | 'createdAt'> {
@@ -160,7 +174,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
             <button
               key={opt.value}
               type="button"
-              onClick={() => setStatus(opt.value)}
+              onClick={() => handleStatusChange(opt.value)}
               className={[
                 'rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150',
                 status === opt.value ? opt.activeClass : 'bg-gray-100 text-gray-500',
@@ -314,7 +328,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
             <button
               key={opt.value}
               type="button"
-              onClick={() => setOutcome(opt.value)}
+              onClick={() => handleOutcomeChange(opt.value)}
               className={[
                 'w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-all duration-150',
                 outcome === opt.value ? opt.active : opt.base,

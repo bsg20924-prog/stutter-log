@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDlXYfzhT2vEcwt5NfDmfUa48URnCUIvb8',
@@ -11,4 +11,5 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+// undefined 필드를 Firestore에 쓰려 하면 SDK가 에러를 던짐 — 무시하도록 설정
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
