@@ -21,7 +21,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 // Provider 안에서 실제 앱 렌더링 (useLogStore 사용 가능)
 function AppShell() {
   const [activeTab, setActiveTab] = useState<Tab>('record');
-  const { addEntry } = useLogStore();
+  const { addEntry, loading } = useLogStore();
 
   function handleAdd(entry: Omit<LogEntry, 'id' | 'createdAt'>) {
     addEntry(entry);
@@ -29,6 +29,14 @@ function AppShell() {
   }
 
   const today = format(new Date(), 'M월 d일 (EEEE)', { locale: ko });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-dvh bg-gray-50">
+        <p className="text-gray-400 text-sm">불러오는 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-dvh bg-gray-50">

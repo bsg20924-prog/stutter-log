@@ -1,11 +1,14 @@
 import React, {
-  useState, useCallback, useMemo,
+  useState, useCallback, useMemo, useEffect,
   createContext, useContext,
 } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  collection, onSnapshot, doc,
+  setDoc, deleteDoc, query, orderBy,
+} from 'firebase/firestore';
+import { db } from '../firebase';
 import { LogEntry } from '../types';
-
-const STORAGE_KEY = 'stutter_log';
 
 const SITUATION_MAP: Record<string, LogEntry['situations'][number]> = {
   카페_주문:  '주문/결제',
@@ -34,101 +37,109 @@ function migrateOutcome(raw: unknown): LogEntry['outcome'] {
   return (OUTCOME_MAP[s] ?? s) as LogEntry['outcome'];
 }
 
-function migrate(entry: Record<string, unknown>): LogEntry {
-  const rawSituations: unknown[] = Array.isArray(entry.situations)
-    ? entry.situations
-    : entry.situation ? [entry.situation] : [];
+function migrate(data: Record<string, unknown>): LogEntry {
+  const rawSituations: unknown[] = Array.isArray(data.situations)
+    ? data.situations
+    : data.situation ? [data.situation] : [];
 
   return {
-    id:             String(entry.id ?? ''),
-    createdAt:      String(entry.createdAt ?? ''),
-    word:           String(entry.word ?? ''),
-    blockedSyllable: String(entry.blockedSyllable ?? ''),
-    phoneme:        String(entry.phoneme ?? ''),
-    situations:     rawSituations.map(migrateSituation),
-    outcome:        migrateOutcome(entry.outcome),
-    isDetailed:     Boolean(entry.isDetailed ?? false),
-    anxietyScore:   typeof entry.anxietyScore === 'number' ? entry.anxietyScore : undefined,
-    physicalState:  entry.physicalState ? String(entry.physicalState) : undefined,
-    emotionalState: entry.emotionalState ? String(entry.emotionalState) : undefined,
-    note:           entry.note ? String(entry.note) : undefined,
+    id:              String(data.id ?? ''),
+    createdAt:       String(data.createdAt ?? ''),
+    word:            String(data.word ?? ''),
+    blockedSyllable: String(data.blockedSyllable ?? ''),
+    phoneme:         String(data.phoneme ?? ''),
+    situations:      rawSituations.map(migrateSituation),
+    outcome:         migrateOutcome(data.outcome),
+    isDetailed:      Boolean(data.isDetailed ?? false),
+    anxietyScore:    typeof data.anxietyScore === 'number' ? data.anxietyScore : undefined,
+    physicalState:   data.physicalState ? String(data.physicalState) : undefined,
+    emotionalState:  data.emotionalState ? String(data.emotionalState) : undefined,
+    note:            data.note ? String(data.note) : undefined,
   };
-}
-
-function load(): LogEntry[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Record<string, unknown>[];
-    return parsed.map(migrate);
-  } catch {
-    return [];
-  }
-}
-
-function persist(entries: LogEntry[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
 interface LogStore {
   entries: LogEntry[];
-  addEntry: (entry: Omit<LogEntry, 'id' | 'createdAt'>) => LogEntry;
-  updateEntry: (id: string, updates: Omit<LogEntry, 'id' | 'createdAt'>) => void;
-  deleteEntry: (id: string) => void;
+  loading: boolean;
+  addEntry: (entry: Omit<LogEntry, 'id' | 'createdAt'>) => Promise<LogEntry>;
+  updateEntry: (id: string, updates: Omit<LogEntry, 'id' | 'createdAt'>) => Promise<void>;
+  deleteEntry: (id: string) => Promise<void>;
   getAllEntries: () => LogEntry[];
   getEntriesByDate: (date: string) => LogEntry[];
 }
 
 const LogStoreContext = createContext<LogStore | null>(null);
 
-export function LogStoreProvider({ children }: { children: React.ReactNode }) {
-  const [entries, setEntries] = useState<LogEntry[]>(load);
+const COLLECTION = 'logs';
+const LOCAL_KEY = 'stutter_log';
+const MIGRATED_KEY = 'stutter_log_migrated';
 
-  const addEntry = useCallback((entry: Omit<LogEntry, 'id' | 'createdAt'>): LogEntry => {
+async function migrateFromLocalStorage() {
+  if (localStorage.getItem(MIGRATED_KEY)) return;
+  const raw = localStorage.getItem(LOCAL_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>[];
+    await Promise.all(
+      parsed.map(item => {
+        const entry = migrate(item);
+        return setDoc(doc(db, COLLECTION, entry.id), entry);
+      })
+    );
+    localStorage.setItem(MIGRATED_KEY, '1');
+  } catch {
+    // 마이그레이션 실패 시 무시 — 다음 실행에 재시도
+  }
+}
+
+export function LogStoreProvider({ children }: { children: React.ReactNode }) {
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    migrateFromLocalStorage().then(() => {
+      const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'));
+      const unsub = onSnapshot(q, (snapshot) => {
+        const docs = snapshot.docs.map(d => migrate({ ...d.data(), id: d.id }));
+        setEntries(docs);
+        setLoading(false);
+      });
+      return unsub;
+    });
+  }, []);
+
+  const addEntry = useCallback(async (entry: Omit<LogEntry, 'id' | 'createdAt'>): Promise<LogEntry> => {
     const newEntry: LogEntry = {
       ...entry,
       id: uuidv4(),
       createdAt: new Date().toISOString(),
     };
-    setEntries(prev => {
-      const next = [newEntry, ...prev];
-      persist(next);
-      return next;
-    });
+    await setDoc(doc(db, COLLECTION, newEntry.id), newEntry);
     return newEntry;
   }, []);
 
-  const updateEntry = useCallback((id: string, updates: Omit<LogEntry, 'id' | 'createdAt'>) => {
-    setEntries(prev => {
-      const next = prev.map(e =>
-        e.id === id ? { ...updates, id: e.id, createdAt: e.createdAt } : e
-      );
-      persist(next);
-      return next;
-    });
-  }, []);
+  const updateEntry = useCallback(async (id: string, updates: Omit<LogEntry, 'id' | 'createdAt'>) => {
+    const existing = entries.find(e => e.id === id);
+    if (!existing) return;
+    await setDoc(doc(db, COLLECTION, id), { ...updates, id, createdAt: existing.createdAt });
+  }, [entries]);
 
-  const deleteEntry = useCallback((id: string) => {
-    setEntries(prev => {
-      const next = prev.filter(e => e.id !== id);
-      persist(next);
-      return next;
-    });
+  const deleteEntry = useCallback(async (id: string) => {
+    await deleteDoc(doc(db, COLLECTION, id));
   }, []);
 
   const getAllEntries = useCallback(() => entries, [entries]);
 
   const getEntriesByDate = useCallback(
     (date: string) => entries.filter(e => e.createdAt.startsWith(date)),
-    [entries]
+    [entries],
   );
 
   const value = useMemo(
-    () => ({ entries, addEntry, updateEntry, deleteEntry, getAllEntries, getEntriesByDate }),
-    [entries, addEntry, updateEntry, deleteEntry, getAllEntries, getEntriesByDate]
+    () => ({ entries, loading, addEntry, updateEntry, deleteEntry, getAllEntries, getEntriesByDate }),
+    [entries, loading, addEntry, updateEntry, deleteEntry, getAllEntries, getEntriesByDate],
   );
 
-  // React.createElement를 사용해 .ts 파일에서 JSX 없이 Provider 렌더링
   return React.createElement(LogStoreContext.Provider, { value }, children);
 }
 
