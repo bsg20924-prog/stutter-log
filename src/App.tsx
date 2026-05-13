@@ -8,6 +8,7 @@ import LogForm from './components/LogForm';
 import LogList from './components/LogList';
 import StatsPanel from './components/StatsPanel';
 import ExportButton from './components/ExportButton';
+import QuickLogInput from './components/QuickLogInput';
 import './index.css';
 
 type Tab = 'record' | 'log' | 'stats';
@@ -53,7 +54,15 @@ function AppShell() {
       {/* ── 스크롤 콘텐츠 ── */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-lg mx-auto px-4 pt-4 pb-32">
-          {activeTab === 'record' && <LogForm onSubmit={handleAdd} />}
+          {activeTab === 'record' && (
+            <div className="space-y-4">
+              <QuickLogInput />
+              <div>
+                <p className="text-xs font-semibold text-gray-400 mb-3 px-1">상세 기록</p>
+                <LogForm onSubmit={handleAdd} />
+              </div>
+            </div>
+          )}
           {activeTab === 'log'    && <LogList />}
           {activeTab === 'stats'  && <StatsPanel />}
         </div>

@@ -24,6 +24,25 @@ export interface SyllableComponents {
   jongseong: string | null;  // 종성 자음 (없으면 null)
 }
 
+// 완성 음절에서 종성 반환 (없으면 null)
+export function getJongseong(syllable: string): string | null {
+  const c = decomposeSyllable(syllable);
+  return c?.jongseong ?? null;
+}
+
+// 완성 음절 또는 단독 자음 입력에서 초성 반환
+const COMPAT_CONSONANTS = new Set(['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ']);
+
+export function getChosungFromInput(input: string): string | null {
+  const char = input?.trim()[0];
+  if (!char) return null;
+  const code = char.charCodeAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    return decomposeSyllable(char)?.chosung ?? null;
+  }
+  return COMPAT_CONSONANTS.has(char) ? char : null;
+}
+
 export function decomposeSyllable(input: string): SyllableComponents | null {
   const char = input.trim()[0];
   if (!char) return null;

@@ -1,4 +1,5 @@
 import { LogEntry, OutcomeTag, SituationTag } from '../types';
+import { isTransitionPhoneme, parseTransition } from './phonetics';
 
 const AVOID_OUTCOMES = new Set<OutcomeTag>(['상대가_대신_말함', '중간에_포기함', '아예_회피함']);
 
@@ -8,7 +9,7 @@ export function getSituationStats(
   const map = new Map<SituationTag, { count: number; avoided: number }>();
   for (const e of entries) {
     const isAvoid = e.outcome ? AVOID_OUTCOMES.has(e.outcome) : false;
-    for (const sit of e.situations) {
+    for (const sit of (e.situations ?? [])) {
       const cur = map.get(sit) ?? { count: 0, avoided: 0 };
       map.set(sit, { count: cur.count + 1, avoided: cur.avoided + (isAvoid ? 1 : 0) });
     }
@@ -36,4 +37,25 @@ export function getOutcomeDistribution(
   ];
   return ALL.map(o => ({ outcome: o, count: map.get(o) ?? 0 }))
     .filter(({ count }) => count > 0);
+}
+
+// 전이 음소(연결 발음 막힘) 빈도 집계
+export function getTransitionStats(
+  entries: LogEntry[]
+): { transition: string; label: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const e of entries) {
+    for (const p of (e.phonemes ?? [])) {
+      if (!p || !isTransitionPhoneme(p)) continue;
+      const parsed = parseTransition(p);
+      if (!parsed) continue;
+      map.set(p, (map.get(p) ?? 0) + 1);
+    }
+  }
+  return [...map.entries()]
+    .map(([key, count]) => {
+      const [a, b] = parseTransition(key)!;
+      return { transition: key, label: `${a} → ${b}`, count };
+    })
+    .sort((a, b) => b.count - a.count);
 }
