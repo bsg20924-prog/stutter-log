@@ -199,7 +199,7 @@ export default function ArticulationMap({ frequency }: Props) {
                 <span className="text-xs text-gray-400 w-8 text-right shrink-0">
                   {pct}%
                 </span>
-                <span className="text-xs text-gray-300 hidden sm:inline shrink-0 w-24">
+                <span className="text-xs text-gray-300 shrink-0 w-20 truncate">
                   {ZONE_PHONEMES[zone].join(' ')}
                 </span>
               </div>
