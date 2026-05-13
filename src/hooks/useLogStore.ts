@@ -67,7 +67,6 @@ function migrate(data: Record<string, unknown>): LogEntry {
     situations:      rawSituations.map(migrateSituation),
     outcome:         migrateOutcome(data.outcome),
     isDetailed:      Boolean(data.isDetailed ?? false),
-    anxietyScore:    typeof data.anxietyScore === 'number' ? data.anxietyScore : undefined,
     physicalState:   data.physicalState ? String(data.physicalState) : undefined,
     emotionalState:  data.emotionalState ? String(data.emotionalState) : undefined,
     note:            data.note ? String(data.note) : undefined,

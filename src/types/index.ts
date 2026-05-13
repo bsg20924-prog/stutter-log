@@ -32,7 +32,6 @@ export interface LogEntry {
   outcome: OutcomeTag | '';   // 빠른 저장 시 빈 문자열
 
   isDetailed: boolean;
-  anxietyScore?: number;
   physicalState?: string;
   emotionalState?: string;
   note?: string;

@@ -8,7 +8,7 @@ function toCSV(entries: LogEntry[]): string {
 
   const header = [
     '날짜', '시간', '단어', '막힌음절', '초성',
-    '상황', '결과', '긴장도', '신체상태', '감정상태', '메모',
+    '상황', '결과', '신체상태', '감정상태', '메모',
   ].map(escape).join(',');
 
   const rows = entries.map(e =>
@@ -20,7 +20,6 @@ function toCSV(entries: LogEntry[]): string {
       (e.phonemes ?? []).join('/'),
       e.situations.map(s => s.replace(/_/g, ' ')).join(' / '),
       (e.outcome || '빠른기록').replace(/_/g, ' '),
-      e.anxietyScore ?? '',
       e.physicalState ?? '',
       e.emotionalState ?? '',
       e.note ?? '',

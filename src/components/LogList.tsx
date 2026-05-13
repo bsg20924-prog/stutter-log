@@ -151,12 +151,6 @@ function EntryCard({
       {/* 펼친 상태: 상세 정보 */}
       {expanded && (
         <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
-          {entry.anxietyScore !== undefined && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400">긴장도</span>
-              <span className="text-xs font-semibold text-teal-600">{entry.anxietyScore} / 10</span>
-            </div>
-          )}
           {entry.physicalState && (
             <div className="flex gap-2">
               <span className="text-xs text-gray-400 shrink-0">신체</span>

@@ -37,7 +37,6 @@ interface SyllablePair {
 }
 
 const INITIAL_DETAIL = {
-  anxietyScore: 5,
   physicalState: '',
   emotionalState: '',
   note: '',
@@ -67,7 +66,6 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   const [detail, setDetail] = useState(() =>
     initialValues
       ? {
-          anxietyScore:  initialValues.anxietyScore  ?? 5,
           physicalState:  initialValues.physicalState  ?? '',
           emotionalState: initialValues.emotionalState ?? '',
           note:           initialValues.note           ?? '',
@@ -110,7 +108,6 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
       situations,
       outcome: isQuick ? '' : outcome,
       isDetailed: showDetail && !isQuick,
-      anxietyScore:   showDetail && !isQuick ? detail.anxietyScore : undefined,
       physicalState:  showDetail && !isQuick && detail.physicalState.trim() ? detail.physicalState.trim() : undefined,
       emotionalState: showDetail && !isQuick && detail.emotionalState.trim() ? detail.emotionalState.trim() : undefined,
       note:           showDetail && !isQuick && detail.note.trim() ? detail.note.trim() : undefined,
@@ -317,21 +314,6 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
       {/* ── 상세 기록 섹션 ── */}
       {showDetail && (
         <div className="space-y-4 border-t border-gray-100 pt-4">
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-sm font-medium text-gray-600">긴장도</label>
-              <span className="text-lg font-bold text-teal-600 w-6 text-center">{detail.anxietyScore}</span>
-            </div>
-            <input
-              type="range" min={1} max={10}
-              value={detail.anxietyScore}
-              onChange={e => setDetail(prev => ({ ...prev, anxietyScore: Number(e.target.value) }))}
-              className="w-full accent-teal-500"
-            />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>1 — 여유</span><span>10 — 극도 긴장</span>
-            </div>
-          </div>
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1.5">
               신체 상태 <span className="text-gray-400 font-normal">(선택)</span>
