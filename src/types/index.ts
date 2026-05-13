@@ -22,14 +22,15 @@ export interface LogEntry {
   id: string;
   createdAt: string;
 
-  // 1단계 필수
   word: string;
-  blockedSyllable: string;
-  phoneme: string;
-  situations: SituationTag[];
-  outcome: OutcomeTag;
 
-  // 2단계 선택
+  // 다중 음절 지원 (빠른 저장 시 빈 배열 가능)
+  blockedSyllables: string[];
+  phonemes: string[];
+
+  situations: SituationTag[];
+  outcome: OutcomeTag | '';   // 빠른 저장 시 빈 문자열
+
   isDetailed: boolean;
   anxietyScore?: number;
   physicalState?: string;

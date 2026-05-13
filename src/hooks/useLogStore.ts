@@ -42,12 +42,28 @@ function migrate(data: Record<string, unknown>): LogEntry {
     ? data.situations
     : data.situation ? [data.situation] : [];
 
+  // 구형: blockedSyllable/phoneme (string) → 신형: blockedSyllables/phonemes (string[])
+  let blockedSyllables: string[];
+  let phonemes: string[];
+  if (Array.isArray(data.blockedSyllables)) {
+    blockedSyllables = (data.blockedSyllables as unknown[]).map(s => String(s)).filter(Boolean);
+  } else {
+    const old = String(data.blockedSyllable ?? '');
+    blockedSyllables = old ? [old] : [];
+  }
+  if (Array.isArray(data.phonemes)) {
+    phonemes = (data.phonemes as unknown[]).map(s => String(s)).filter(Boolean);
+  } else {
+    const old = String(data.phoneme ?? '');
+    phonemes = old ? [old] : [];
+  }
+
   return {
     id:              String(data.id ?? ''),
     createdAt:       String(data.createdAt ?? ''),
     word:            String(data.word ?? ''),
-    blockedSyllable: String(data.blockedSyllable ?? ''),
-    phoneme:         String(data.phoneme ?? ''),
+    blockedSyllables,
+    phonemes,
     situations:      rawSituations.map(migrateSituation),
     outcome:         migrateOutcome(data.outcome),
     isDetailed:      Boolean(data.isDetailed ?? false),

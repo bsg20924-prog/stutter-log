@@ -7,7 +7,7 @@ export function getSituationStats(
 ): { situation: string; count: number; avoidRate: number }[] {
   const map = new Map<SituationTag, { count: number; avoided: number }>();
   for (const e of entries) {
-    const isAvoid = AVOID_OUTCOMES.has(e.outcome);
+    const isAvoid = e.outcome ? AVOID_OUTCOMES.has(e.outcome) : false;
     for (const sit of e.situations) {
       const cur = map.get(sit) ?? { count: 0, avoided: 0 };
       map.set(sit, { count: cur.count + 1, avoided: cur.avoided + (isAvoid ? 1 : 0) });
@@ -27,6 +27,7 @@ export function getOutcomeDistribution(
 ): { outcome: OutcomeTag; count: number }[] {
   const map = new Map<OutcomeTag, number>();
   for (const e of entries) {
+    if (!e.outcome) continue;
     map.set(e.outcome, (map.get(e.outcome) ?? 0) + 1);
   }
   const ALL: OutcomeTag[] = [

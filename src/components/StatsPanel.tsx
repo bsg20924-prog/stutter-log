@@ -36,7 +36,7 @@ export default function StatsPanel() {
   const situationData = useMemo(() => getSituationStats(entries), [entries]);
   const outcomeRaw    = useMemo(() => getOutcomeDistribution(entries), [entries]);
   const zoneFreq      = useMemo(
-    () => getZoneFrequency(entries.map(e => e.phoneme).filter(Boolean)),
+    () => getZoneFrequency(entries.flatMap(e => e.phonemes ?? []).filter(Boolean)),
     [entries]
   );
 

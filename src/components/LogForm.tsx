@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Plus, X } from 'lucide-react';
 import { LogEntry, SituationTag, OutcomeTag } from '../types';
 import { decomposeSyllable } from '../utils/korean';
 
@@ -31,13 +31,10 @@ const OUTCOME_OPTIONS: {
   { value: '아예_회피함',          label: '아예 회피함',          dot: 'bg-red-600',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-100 text-red-800 border border-red-400 font-semibold' },
 ];
 
-const INITIAL_FORM = {
-  word: '',
-  blockedSyllable: '',
-  phoneme: '',
-  situations: [] as SituationTag[],
-  outcome: '' as OutcomeTag | '',
-};
+interface SyllablePair {
+  syllable: string;
+  phoneme: string;
+}
 
 const INITIAL_DETAIL = {
   anxietyScore: 5,
@@ -47,76 +44,101 @@ const INITIAL_DETAIL = {
 };
 
 interface Props {
-  onSubmit: (entry: Omit<LogEntry, 'id' | 'createdAt'>) => void;
+  onSubmit: (entry: Omit<LogEntry, 'id' | 'createdAt'>) => void | Promise<void>;
   initialValues?: LogEntry;
   onCancel?: () => void;
 }
 
 export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
-  const isEditMode = initialValues !== undefined;
+  const isEditMode = !!initialValues;
 
-  const [form, setForm] = useState(() =>
-    initialValues
-      ? {
-          word:            initialValues.word,
-          blockedSyllable: initialValues.blockedSyllable,
-          phoneme:         initialValues.phoneme,
-          situations:      initialValues.situations,
-          outcome:         initialValues.outcome as OutcomeTag | '',
-        }
-      : INITIAL_FORM
-  );
+  const [word, setWord] = useState(initialValues?.word ?? '');
+  const [syllableInput, setSyllableInput] = useState('');
+  const [pairs, setPairs] = useState<SyllablePair[]>(() => {
+    if (!initialValues) return [];
+    const syls = initialValues.blockedSyllables ?? [];
+    const phns = initialValues.phonemes ?? [];
+    return syls.map((s, i) => ({ syllable: s, phoneme: phns[i] ?? '' }));
+  });
+  const [pendingPhoneme, setPendingPhoneme] = useState('');
+  const [situations, setSituations] = useState<SituationTag[]>(initialValues?.situations ?? []);
+  const [outcome, setOutcome] = useState<OutcomeTag | ''>(initialValues?.outcome ?? '');
+  const [showDetail, setShowDetail] = useState(initialValues?.isDetailed ?? false);
   const [detail, setDetail] = useState(() =>
     initialValues
       ? {
-          anxietyScore:  initialValues.anxietyScore ?? 5,
+          anxietyScore:  initialValues.anxietyScore  ?? 5,
           physicalState:  initialValues.physicalState  ?? '',
           emotionalState: initialValues.emotionalState ?? '',
           note:           initialValues.note           ?? '',
         }
       : INITIAL_DETAIL
   );
-  const [showDetail, setShowDetail] = useState(initialValues?.isDetailed ?? false);
 
-  // 음절 분해 (파생 상태)
-  const components = decomposeSyllable(form.blockedSyllable);
+  const components = decomposeSyllable(syllableInput);
 
-  const isValid =
-    form.word.trim() !== '' &&
-    form.blockedSyllable.trim() !== '' &&
-    form.phoneme !== '' &&
-    form.situations.length > 0 &&
-    form.outcome !== '';
+  const isQuickValid = word.trim() !== '';
+  const isFullValid =
+    isQuickValid &&
+    pairs.length > 0 &&
+    pairs.every(p => p.phoneme !== '') &&
+    situations.length > 0 &&
+    outcome !== '';
 
-  function toggleSituation(tag: SituationTag) {
-    setForm(prev => ({
-      ...prev,
-      situations: prev.situations.includes(tag)
-        ? prev.situations.filter(s => s !== tag)
-        : [...prev.situations, tag],
-    }));
+  function addPair() {
+    if (!syllableInput.trim() || !pendingPhoneme) return;
+    setPairs(prev => [...prev, { syllable: syllableInput.trim(), phoneme: pendingPhoneme }]);
+    setSyllableInput('');
+    setPendingPhoneme('');
   }
 
-  function handleSubmit(e: FormEvent) {
+  function removePair(idx: number) {
+    setPairs(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function toggleSituation(tag: SituationTag) {
+    setSituations(prev =>
+      prev.includes(tag) ? prev.filter(s => s !== tag) : [...prev, tag]
+    );
+  }
+
+  function buildEntry(isQuick: boolean): Omit<LogEntry, 'id' | 'createdAt'> {
+    return {
+      word: word.trim(),
+      blockedSyllables: pairs.map(p => p.syllable),
+      phonemes: pairs.map(p => p.phoneme),
+      situations,
+      outcome: isQuick ? '' : outcome,
+      isDetailed: showDetail && !isQuick,
+      anxietyScore:   showDetail && !isQuick ? detail.anxietyScore : undefined,
+      physicalState:  showDetail && !isQuick && detail.physicalState.trim() ? detail.physicalState.trim() : undefined,
+      emotionalState: showDetail && !isQuick && detail.emotionalState.trim() ? detail.emotionalState.trim() : undefined,
+      note:           showDetail && !isQuick && detail.note.trim() ? detail.note.trim() : undefined,
+    };
+  }
+
+  function reset() {
+    setWord('');
+    setSyllableInput('');
+    setPairs([]);
+    setPendingPhoneme('');
+    setSituations([]);
+    setOutcome('');
+    setShowDetail(false);
+    setDetail(INITIAL_DETAIL);
+  }
+
+  async function handleQuickSave() {
+    if (!isQuickValid) return;
+    await onSubmit(buildEntry(true));
+    if (!isEditMode) reset();
+  }
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!isValid) return;
-    onSubmit({
-      word:            form.word.trim(),
-      blockedSyllable: form.blockedSyllable.trim(),
-      phoneme:         form.phoneme,
-      situations:      form.situations,
-      outcome:         form.outcome as OutcomeTag,
-      isDetailed:      showDetail,
-      anxietyScore:    showDetail ? detail.anxietyScore : undefined,
-      physicalState:   showDetail && detail.physicalState.trim() ? detail.physicalState.trim() : undefined,
-      emotionalState:  showDetail && detail.emotionalState.trim() ? detail.emotionalState.trim() : undefined,
-      note:            showDetail && detail.note.trim() ? detail.note.trim() : undefined,
-    });
-    if (!isEditMode) {
-      setForm(INITIAL_FORM);
-      setDetail(INITIAL_DETAIL);
-      setShowDetail(false);
-    }
+    if (!isFullValid) return;
+    await onSubmit(buildEntry(false));
+    if (!isEditMode) reset();
   }
 
   const inputCls = 'w-full rounded-xl bg-gray-100 border-0 px-3 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-300';
@@ -124,80 +146,123 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* 막힌 단어 */}
+      {/* ── 막힌 단어 ── */}
       <div>
         <label className="block text-sm font-medium text-gray-600 mb-1.5">막힌 단어</label>
         <input
           type="text"
-          value={form.word}
-          onChange={e => setForm(prev => ({ ...prev, word: e.target.value }))}
+          value={word}
+          onChange={e => setWord(e.target.value)}
           placeholder="예: 아메리카노"
           className={inputCls}
         />
+        {/* 빠른 저장 버튼 — 단어만 입력해도 바로 저장 */}
+        {isQuickValid && !isEditMode && (
+          <button
+            type="button"
+            onClick={handleQuickSave}
+            className="mt-2 w-full rounded-xl py-2 text-xs font-semibold bg-teal-50 text-teal-600 border border-teal-200 hover:bg-teal-100 transition-colors"
+          >
+            ⚡ 빠른 저장 (단어만)
+          </button>
+        )}
       </div>
 
-      {/* 막힌 음절 + 음소 선택 */}
+      {/* ── 막힌 음절 (다중 추가) ── */}
       <div>
-        <label className="block text-sm font-medium text-gray-600 mb-1.5">막힌 음절</label>
-        <input
-          type="text"
-          value={form.blockedSyllable}
-          onChange={e => setForm(prev => ({
-            ...prev,
-            blockedSyllable: e.target.value,
-            phoneme: '',          // 음절 바뀌면 선택 초기화
-          }))}
-          maxLength={2}
-          placeholder="예: 삼"
-          className={inputCls}
-        />
+        <label className="block text-sm font-medium text-gray-600 mb-1.5">
+          막힌 음절 <span className="text-gray-400 font-normal">(여러 개 추가 가능)</span>
+        </label>
 
-        {/* 음소 선택 칩 — 음절이 분해됐을 때만 표시 */}
+        {/* 추가된 음절 칩 목록 */}
+        {pairs.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {pairs.map((pair, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 bg-teal-50 border border-teal-200 rounded-full pl-3 pr-2 py-1"
+              >
+                <span className="text-sm font-bold text-teal-700">{pair.syllable}</span>
+                <span className="text-xs text-teal-500">{pair.phoneme}</span>
+                <button
+                  type="button"
+                  onClick={() => removePair(idx)}
+                  className="text-teal-400 hover:text-red-400 transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 음절 입력 + 음소 선택 */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={syllableInput}
+            onChange={e => {
+              setSyllableInput(e.target.value);
+              setPendingPhoneme('');
+            }}
+            maxLength={2}
+            placeholder="예: 아"
+            className={`${inputCls} flex-1`}
+          />
+          <button
+            type="button"
+            onClick={addPair}
+            disabled={!syllableInput.trim() || !pendingPhoneme}
+            className="flex items-center gap-1 px-3 rounded-xl text-sm font-medium bg-teal-500 text-white disabled:bg-gray-200 disabled:text-gray-400 transition-colors shrink-0"
+          >
+            <Plus size={15} />
+            추가
+          </button>
+        </div>
+
+        {/* 음소 선택 칩 */}
         {components && (
-          <div className="mt-3 bg-gray-50 rounded-xl p-3">
-            <p className="text-xs text-gray-500 mb-2.5">
-              어느 발음에서 막혔나요?
-            </p>
+          <div className="mt-2 bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-2">어느 발음에서 막혔나요?</p>
             <div className="flex gap-2 flex-wrap">
-              {/* 초성 */}
               <PhonemeChip
                 phoneme={components.chosung}
                 label="초성"
-                selected={form.phoneme === components.chosung}
-                onSelect={() => setForm(prev => ({ ...prev, phoneme: components.chosung }))}
+                selected={pendingPhoneme === components.chosung}
+                onSelect={() => setPendingPhoneme(components.chosung)}
               />
-              {/* 중성 */}
               <PhonemeChip
                 phoneme={components.jungseong}
                 label="모음"
-                selected={form.phoneme === components.jungseong}
-                onSelect={() => setForm(prev => ({ ...prev, phoneme: components.jungseong }))}
+                selected={pendingPhoneme === components.jungseong}
+                onSelect={() => setPendingPhoneme(components.jungseong)}
               />
-              {/* 종성 (받침 있을 때만) */}
               {components.jongseong && (
                 <PhonemeChip
                   phoneme={components.jongseong}
                   label="받침"
-                  selected={form.phoneme === components.jongseong}
-                  onSelect={() => setForm(prev => ({ ...prev, phoneme: components.jongseong! }))}
+                  selected={pendingPhoneme === components.jongseong}
+                  onSelect={() => setPendingPhoneme(components.jongseong!)}
                 />
               )}
             </div>
-            {form.phoneme === '' && (
-              <p className="text-xs text-amber-500 mt-2">하나를 선택해 주세요</p>
+            {pendingPhoneme && (
+              <p className="text-xs text-teal-500 mt-2">
+                음소 선택됨 — "추가" 버튼을 눌러 추가하세요
+              </p>
             )}
           </div>
         )}
       </div>
 
-      {/* 상황 — 칩 다중 선택 */}
+      {/* ── 상황 ── */}
       <div>
         <label className="block text-sm font-medium text-gray-600 mb-2">
           상황 <span className="text-gray-400 font-normal">(복수 선택)</span>
         </label>
         <div className="flex flex-wrap gap-2">
           {SITUATION_OPTIONS.map(opt => {
-            const selected = form.situations.includes(opt.value);
+            const selected = situations.includes(opt.value);
             return (
               <button
                 key={opt.value}
@@ -215,7 +280,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
         </div>
       </div>
 
-      {/* 결과 — 세로 리스트 */}
+      {/* ── 결과 ── */}
       <div>
         <label className="block text-sm font-medium text-gray-600 mb-2">결과</label>
         <div className="space-y-1.5">
@@ -223,10 +288,10 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
             <button
               key={opt.value}
               type="button"
-              onClick={() => setForm(prev => ({ ...prev, outcome: opt.value }))}
+              onClick={() => setOutcome(opt.value)}
               className={[
                 'w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-all duration-150',
-                form.outcome === opt.value ? opt.active : opt.base,
+                outcome === opt.value ? opt.active : opt.base,
               ].join(' ')}
             >
               <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${opt.dot}`} />
@@ -236,7 +301,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
         </div>
       </div>
 
-      {/* 상세 기록 토글 */}
+      {/* ── 상세 기록 토글 ── */}
       <button
         type="button"
         onClick={() => setShowDetail(prev => !prev)}
@@ -249,72 +314,59 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
         {showDetail ? '상세 기록 닫기' : '상세 기록 추가'}
       </button>
 
-      {/* 상세 기록 섹션 */}
+      {/* ── 상세 기록 섹션 ── */}
       {showDetail && (
         <div className="space-y-4 border-t border-gray-100 pt-4">
-
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-sm font-medium text-gray-600">긴장도</label>
               <span className="text-lg font-bold text-teal-600 w-6 text-center">{detail.anxietyScore}</span>
             </div>
             <input
-              type="range"
-              min={1}
-              max={10}
+              type="range" min={1} max={10}
               value={detail.anxietyScore}
               onChange={e => setDetail(prev => ({ ...prev, anxietyScore: Number(e.target.value) }))}
               className="w-full accent-teal-500"
             />
             <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>1 — 여유</span>
-              <span>10 — 극도 긴장</span>
+              <span>1 — 여유</span><span>10 — 극도 긴장</span>
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1.5">
               신체 상태 <span className="text-gray-400 font-normal">(선택)</span>
             </label>
-            <input
-              type="text"
-              value={detail.physicalState}
+            <input type="text" value={detail.physicalState}
               onChange={e => setDetail(prev => ({ ...prev, physicalState: e.target.value }))}
               placeholder="예: 가슴이 답답함, 숨을 멈춤"
               className={inputCls}
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1.5">
               감정 상태 <span className="text-gray-400 font-normal">(선택)</span>
             </label>
-            <input
-              type="text"
-              value={detail.emotionalState}
+            <input type="text" value={detail.emotionalState}
               onChange={e => setDetail(prev => ({ ...prev, emotionalState: e.target.value }))}
               placeholder="예: 미리 겁먹음, 조급함"
               className={inputCls}
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1.5">
               메모 <span className="text-gray-400 font-normal">(선택)</span>
             </label>
-            <textarea
-              value={detail.note}
+            <textarea value={detail.note}
               onChange={e => setDetail(prev => ({ ...prev, note: e.target.value }))}
               placeholder="상황, 감정, 시도한 것 등 자유롭게..."
               rows={3}
               className={`${inputCls} resize-none`}
             />
           </div>
-
         </div>
       )}
 
-      {/* 저장 / 취소 */}
+      {/* ── 저장 / 취소 ── */}
       <div className={isEditMode ? 'flex gap-2' : ''}>
         {isEditMode && (
           <button
@@ -327,7 +379,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
         )}
         <button
           type="submit"
-          disabled={!isValid}
+          disabled={!isFullValid}
           className={[
             'rounded-xl py-3 text-sm font-semibold transition-colors',
             isEditMode ? 'flex-1' : 'w-full',
@@ -343,7 +395,6 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   );
 }
 
-// ── 음소 칩 컴포넌트 ──────────────────────────────────────────
 function PhonemeChip({
   phoneme, label, selected, onSelect,
 }: {

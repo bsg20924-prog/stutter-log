@@ -32,6 +32,8 @@ const SITUATION_COLOR: Record<SituationTag, string> = {
 };
 
 // ── 결과 뱃지 ──────────────────────────────────────────────
+const QUICK_BADGE = { label: '빠른 기록', className: 'bg-teal-50 text-teal-500 border border-teal-200' };
+
 const OUTCOME_CONFIG: Record<OutcomeTag, { label: string; className: string }> = {
   그대로_자연스럽게:    { label: '자연스럽게',    className: 'bg-emerald-100 text-emerald-700' },
   막혔지만_끝까지_말함: { label: '끝까지 말함',   className: 'bg-yellow-100 text-yellow-700' },
@@ -65,16 +67,20 @@ function formatDateHeader(iso: string): string {
 
 // ── 하위 컴포넌트 ──────────────────────────────────────────
 
-function HighlightedWord({ word, blockedSyllable }: { word: string; blockedSyllable: string }) {
-  const idx = blockedSyllable ? word.indexOf(blockedSyllable) : -1;
-  if (idx === -1) return <span className="font-medium">{word}</span>;
-  return (
-    <span className="font-medium">
-      {word.slice(0, idx)}
-      <strong className="text-red-500">{blockedSyllable}</strong>
-      {word.slice(idx + blockedSyllable.length)}
-    </span>
-  );
+function HighlightedWord({ word, blockedSyllables }: { word: string; blockedSyllables: string[] }) {
+  if (!blockedSyllables.length) return <span className="font-medium">{word}</span>;
+  const parts: React.ReactNode[] = [];
+  let remaining = word;
+  let key = 0;
+  for (const syl of blockedSyllables) {
+    const idx = remaining.indexOf(syl);
+    if (idx === -1) continue;
+    if (idx > 0) parts.push(<span key={key++}>{remaining.slice(0, idx)}</span>);
+    parts.push(<strong key={key++} className="text-red-500">{syl}</strong>);
+    remaining = remaining.slice(idx + syl.length);
+  }
+  if (remaining) parts.push(<span key={key++}>{remaining}</span>);
+  return <span className="font-medium">{parts}</span>;
 }
 
 function EntryCard({
@@ -88,8 +94,9 @@ function EntryCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const time = format(parseISO(entry.createdAt), 'HH:mm');
-  const outcome = OUTCOME_CONFIG[entry.outcome]
-    ?? { label: String(entry.outcome).replace(/_/g, ' '), className: 'bg-gray-100 text-gray-600' };
+  const outcome = entry.outcome
+    ? (OUTCOME_CONFIG[entry.outcome] ?? { label: String(entry.outcome).replace(/_/g, ' '), className: 'bg-gray-100 text-gray-600' })
+    : QUICK_BADGE;
 
   return (
     <div
@@ -126,9 +133,9 @@ function EntryCard({
 
       {/* 막힌 단어 */}
       <div className="flex items-baseline gap-2 mb-2">
-        <HighlightedWord word={entry.word} blockedSyllable={entry.blockedSyllable} />
-        {expanded && entry.phoneme && (
-          <span className="text-xs text-teal-400">초성: {entry.phoneme}</span>
+        <HighlightedWord word={entry.word} blockedSyllables={entry.blockedSyllables ?? []} />
+        {expanded && entry.phonemes && entry.phonemes.length > 0 && (
+          <span className="text-xs text-teal-400">{entry.phonemes.join(', ')}</span>
         )}
       </div>
 
