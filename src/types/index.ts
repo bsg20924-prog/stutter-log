@@ -1,3 +1,5 @@
+export type LogStatus = 'avoided' | 'blocked' | 'overcome';
+
 export type SituationTag =
   | '전화'
   | '주문/결제'
@@ -31,6 +33,7 @@ export interface LogEntry {
   situations: SituationTag[];
   outcome: OutcomeTag | '';   // 빠른 저장 시 빈 문자열
 
+  status: LogStatus;
   isDetailed: boolean;
   physicalState?: string;
   emotionalState?: string;

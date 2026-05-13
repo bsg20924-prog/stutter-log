@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { ChevronDown, Plus, X } from 'lucide-react';
-import { LogEntry, SituationTag, OutcomeTag } from '../types';
+import { LogEntry, SituationTag, OutcomeTag, LogStatus } from '../types';
 import { decomposeSyllable } from '../utils/korean';
 
 const SITUATION_OPTIONS: { value: SituationTag; label: string }[] = [
@@ -31,6 +31,12 @@ const OUTCOME_OPTIONS: {
   { value: '아예_회피함',          label: '아예 회피함',          dot: 'bg-red-600',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-100 text-red-800 border border-red-400 font-semibold' },
 ];
 
+const STATUS_OPTIONS: { value: LogStatus; label: string; activeClass: string }[] = [
+  { value: 'avoided',  label: '회피함',        activeClass: 'bg-slate-500 text-white' },
+  { value: 'blocked',  label: '막혔음',        activeClass: 'bg-orange-400 text-white' },
+  { value: 'overcome', label: '편안하게 말함', activeClass: 'bg-teal-500 text-white' },
+];
+
 interface SyllablePair {
   syllable: string;
   phoneme: string;
@@ -59,6 +65,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
     const phns = initialValues.phonemes ?? [];
     return syls.map((s, i) => ({ syllable: s, phoneme: phns[i] ?? '' }));
   });
+  const [status, setStatus] = useState<LogStatus>(initialValues?.status ?? 'blocked');
   const [pendingPhoneme, setPendingPhoneme] = useState('');
   const [situations, setSituations] = useState<SituationTag[]>(initialValues?.situations ?? []);
   const [outcome, setOutcome] = useState<OutcomeTag | ''>(initialValues?.outcome ?? '');
@@ -107,6 +114,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
       phonemes: pairs.map(p => p.phoneme),
       situations,
       outcome: isQuick ? '' : outcome,
+      status,
       isDetailed: showDetail && !isQuick,
       physicalState:  showDetail && !isQuick && detail.physicalState.trim() ? detail.physicalState.trim() : undefined,
       emotionalState: showDetail && !isQuick && detail.emotionalState.trim() ? detail.emotionalState.trim() : undefined,
@@ -119,6 +127,7 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
     setSyllableInput('');
     setPairs([]);
     setPendingPhoneme('');
+    setStatus('blocked');
     setSituations([]);
     setOutcome('');
     setShowDetail(false);
@@ -142,6 +151,26 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+
+      {/* ── 상태 ── */}
+      <div>
+        <label className="block text-sm font-medium text-gray-600 mb-1.5">이번 기록</label>
+        <div className="flex flex-wrap gap-2">
+          {STATUS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setStatus(opt.value)}
+              className={[
+                'rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                status === opt.value ? opt.activeClass : 'bg-gray-100 text-gray-500',
+              ].join(' ')}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* ── 막힌 단어 ── */}
       <div>

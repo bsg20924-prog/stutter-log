@@ -2,6 +2,13 @@ import { useState, KeyboardEvent, useMemo } from 'react';
 import { CornerDownLeft } from 'lucide-react';
 import { useLogStore } from '../hooks/useLogStore';
 import { decomposeSyllable } from '../utils/korean';
+import { LogStatus } from '../types';
+
+const STATUS_OPTS: { value: LogStatus; label: string; cls: string }[] = [
+  { value: 'avoided',  label: '회피함', cls: 'bg-slate-500 text-white' },
+  { value: 'blocked',  label: '막힘',   cls: 'bg-orange-400 text-white' },
+  { value: 'overcome', label: '편안함', cls: 'bg-teal-500 text-white' },
+];
 
 function extractSyllables(word: string): string[] {
   const result: string[] = [];
@@ -14,6 +21,7 @@ function extractSyllables(word: string): string[] {
 
 export default function QuickLogInput() {
   const [word, setWord] = useState('');
+  const [status, setStatus] = useState<LogStatus>('blocked');
   const [selectedSyllable, setSelectedSyllable] = useState<string | null>(null);
   const [selectedPhoneme, setSelectedPhoneme] = useState('');
   const [saving, setSaving] = useState(false);
@@ -55,6 +63,7 @@ export default function QuickLogInput() {
       phonemes: selectedPhoneme ? [selectedPhoneme] : [],
       situations: [],
       outcome: '',
+      status,
       isDetailed: false,
     });
     setWord('');
@@ -69,7 +78,24 @@ export default function QuickLogInput() {
 
   return (
     <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] px-4 py-3 space-y-3">
-      <p className="text-xs font-semibold text-teal-500">간편 기록</p>
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-semibold text-teal-500 shrink-0">간편 기록</p>
+        <div className="flex gap-1.5">
+          {STATUS_OPTS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setStatus(opt.value)}
+              className={[
+                'rounded-full px-2.5 py-0.5 text-xs font-medium transition-all duration-150',
+                status === opt.value ? opt.cls : 'bg-gray-100 text-gray-400',
+              ].join(' ')}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* 단어 입력 */}
       <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">

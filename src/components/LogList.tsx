@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Trash2, ChevronDown, Pencil } from 'lucide-react';
 import { useLogStore } from '../hooks/useLogStore';
-import { LogEntry, SituationTag, OutcomeTag } from '../types';
+import { LogEntry, SituationTag, OutcomeTag, LogStatus } from '../types';
 import LogForm from './LogForm';
 
 // ── 상황 뱃지 ──────────────────────────────────────────────
@@ -29,6 +29,13 @@ const SITUATION_COLOR: Record<SituationTag, string> = {
   '피곤함/수면부족': 'bg-indigo-100 text-indigo-700',
   '급함/압박감':    'bg-orange-100 text-orange-700',
   기타:             'bg-gray-100 text-gray-600',
+};
+
+// ── 상태 뱃지 ──────────────────────────────────────────────
+const STATUS_BADGE: Record<LogStatus, { label: string; className: string }> = {
+  avoided:  { label: '회피',   className: 'bg-slate-100 text-slate-600' },
+  blocked:  { label: '막힘',   className: 'bg-orange-50 text-orange-600' },
+  overcome: { label: '편안함', className: 'bg-teal-50 text-teal-600' },
 };
 
 // ── 결과 뱃지 ──────────────────────────────────────────────
@@ -87,25 +94,31 @@ function EntryCard({
   entry,
   onDelete,
   onEditStart,
+  onQuickSuccess,
 }: {
   entry: LogEntry;
   onDelete: (id: string) => void;
   onEditStart: (id: string) => void;
+  onQuickSuccess: (entry: LogEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const time = format(parseISO(entry.createdAt), 'HH:mm');
   const outcome = entry.outcome
     ? (OUTCOME_CONFIG[entry.outcome] ?? { label: String(entry.outcome).replace(/_/g, ' '), className: 'bg-gray-100 text-gray-600' })
     : QUICK_BADGE;
+  const statusBadge = STATUS_BADGE[entry.status ?? 'blocked'] ?? STATUS_BADGE['blocked'];
 
   return (
     <div
       className="bg-white rounded-2xl px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] cursor-pointer select-none"
       onClick={() => setExpanded(prev => !prev)}
     >
-      {/* 상단 행: 시간 / 결과 / 삭제+화살표 */}
+      {/* 상단 행: 시간 / 상태 / 결과 / 삭제+화살표 */}
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs text-slate-400 font-mono">{time}</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadge.className}`}>
+          {statusBadge.label}
+        </span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${outcome.className}`}>
           {outcome.label}
         </span>
@@ -169,6 +182,14 @@ function EntryCard({
           {!entry.isDetailed && (
             <p className="text-xs text-gray-300 italic">상세 기록 없음</p>
           )}
+          {entry.status !== 'overcome' && (
+            <button
+              onClick={e => { e.stopPropagation(); onQuickSuccess(entry); }}
+              className="mt-1 w-full text-xs text-teal-500 hover:text-teal-700 py-1.5 rounded-xl hover:bg-teal-50 transition-colors text-center"
+            >
+              편안하게 말함으로 기록
+            </button>
+          )}
         </div>
       )}
 
@@ -182,10 +203,22 @@ function EntryCard({
 
 // ── 메인 컴포넌트 ──────────────────────────────────────────
 export default function LogList() {
-  const { entries, deleteEntry, updateEntry } = useLogStore();
+  const { entries, deleteEntry, updateEntry, addEntry } = useLogStore();
   const handleDelete = async (id: string) => { await deleteEntry(id); };
   const [editingId, setEditingId] = useState<string | null>(null);
   const grouped = useMemo(() => groupByDate(entries), [entries]);
+
+  const handleQuickSuccess = async (entry: LogEntry) => {
+    await addEntry({
+      word: entry.word,
+      blockedSyllables: entry.blockedSyllables,
+      phonemes: entry.phonemes,
+      situations: [],
+      outcome: '',
+      status: 'overcome',
+      isDetailed: false,
+    });
+  };
 
   if (entries.length === 0) {
     return (
@@ -225,6 +258,7 @@ export default function LogList() {
                   entry={entry}
                   onDelete={handleDelete}
                   onEditStart={setEditingId}
+                  onQuickSuccess={handleQuickSuccess}
                 />
               )
             )}

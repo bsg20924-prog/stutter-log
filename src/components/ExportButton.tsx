@@ -2,13 +2,19 @@ import { Download } from 'lucide-react';
 import { useLogStore } from '../hooks/useLogStore';
 import { LogEntry } from '../types';
 
+const STATUS_LABEL: Record<string, string> = {
+  avoided:  '회피함',
+  blocked:  '막혔음',
+  overcome: '편안하게 말함',
+};
+
 function toCSV(entries: LogEntry[]): string {
   const escape = (v: string | number | undefined) =>
     `"${String(v ?? '').replace(/"/g, '""')}"`;
 
   const header = [
     '날짜', '시간', '단어', '막힌음절', '초성',
-    '상황', '결과', '신체상태', '감정상태', '메모',
+    '상황', '결과', '신체상태', '감정상태', '메모', '상태',
   ].map(escape).join(',');
 
   const rows = entries.map(e =>
@@ -23,6 +29,7 @@ function toCSV(entries: LogEntry[]): string {
       e.physicalState ?? '',
       e.emotionalState ?? '',
       e.note ?? '',
+      STATUS_LABEL[e.status ?? 'blocked'] ?? '막혔음',
     ].map(escape).join(',')
   );
 

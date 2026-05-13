@@ -8,7 +8,7 @@ import {
   setDoc, deleteDoc, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { LogEntry } from '../types';
+import { LogEntry, LogStatus, OutcomeTag } from '../types';
 
 const SITUATION_MAP: Record<string, LogEntry['situations'][number]> = {
   카페_주문:  '주문/결제',
@@ -26,6 +26,18 @@ const OUTCOME_MAP: Record<string, LogEntry['outcome']> = {
   막혔지만_말함:   '막혔지만_끝까지_말함',
   자연스럽게_말함: '그대로_자연스럽게',
 };
+
+const VALID_STATUSES = new Set<LogStatus>(['avoided', 'blocked', 'overcome']);
+
+function inferStatusFromOutcome(outcome?: OutcomeTag | ''): LogStatus {
+  if (
+    outcome === '아예_회피함' ||
+    outcome === '중간에_포기함' ||
+    outcome === '상대가_대신_말함'
+  ) return 'avoided';
+  if (outcome === '그대로_자연스럽게') return 'overcome';
+  return 'blocked';
+}
 
 function migrateSituation(raw: unknown): LogEntry['situations'][number] {
   const s = String(raw);
@@ -58,6 +70,12 @@ function migrate(data: Record<string, unknown>): LogEntry {
     phonemes = old ? [old] : [];
   }
 
+  const outcome = migrateOutcome(data.outcome);
+  const rawStatus = String(data.status ?? '');
+  const status: LogStatus = VALID_STATUSES.has(rawStatus as LogStatus)
+    ? (rawStatus as LogStatus)
+    : inferStatusFromOutcome(outcome);
+
   return {
     id:              String(data.id ?? ''),
     createdAt:       String(data.createdAt ?? ''),
@@ -65,7 +83,8 @@ function migrate(data: Record<string, unknown>): LogEntry {
     blockedSyllables,
     phonemes,
     situations:      rawSituations.map(migrateSituation),
-    outcome:         migrateOutcome(data.outcome),
+    outcome,
+    status,
     isDetailed:      Boolean(data.isDetailed ?? false),
     physicalState:   data.physicalState ? String(data.physicalState) : undefined,
     emotionalState:  data.emotionalState ? String(data.emotionalState) : undefined,
