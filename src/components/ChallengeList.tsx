@@ -18,32 +18,35 @@ function SwipeableChallengeCard({
   const [dismissed, setDismissed] = useState(false);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
+  const touchCurrentX = useRef(0); // ref로 추적 — handleTouchEnd의 stale closure 방지
   const directionLocked = useRef<'h' | 'v' | null>(null);
   const successFiredRef = useRef(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Non-passive touchmove to prevent scroll when swiping horizontally
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return;
-
-    function handleTouchMove(e: TouchEvent) {
+    const prevent = (e: TouchEvent) => {
       if (directionLocked.current === 'h') e.preventDefault();
-    }
-
-    el.addEventListener('touchmove', handleTouchMove, { passive: false });
-    return () => el.removeEventListener('touchmove', handleTouchMove);
+    };
+    el.addEventListener('touchmove', prevent, { passive: false });
+    return () => el.removeEventListener('touchmove', prevent);
   }, []);
 
   function handleTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
+    touchCurrentX.current = e.touches[0].clientX;
     directionLocked.current = null;
   }
 
-  function handleTouchMoveReact(e: React.TouchEvent) {
-    const dx = e.touches[0].clientX - touchStartX.current;
-    const dy = e.touches[0].clientY - touchStartY.current;
+  function handleTouchMove(e: React.TouchEvent) {
+    const cx = e.touches[0].clientX;
+    const cy = e.touches[0].clientY;
+    touchCurrentX.current = cx;
+
+    const dx = cx - touchStartX.current;
+    const dy = cy - touchStartY.current;
 
     if (!directionLocked.current) {
       if (Math.abs(dx) > Math.abs(dy) + 4) directionLocked.current = 'h';
@@ -51,47 +54,44 @@ function SwipeableChallengeCard({
       else return;
     }
 
-    if (directionLocked.current === 'h' && dx > 0) {
-      setOffsetX(dx);
-    }
+    if (directionLocked.current === 'h' && dx > 0) setOffsetX(dx);
   }
 
   function handleTouchEnd() {
-    if (directionLocked.current === 'h' && offsetX > 80 && !successFiredRef.current) {
+    // React state(offsetX)가 아닌 ref로 계산 — 렌더 타이밍 무관하게 정확한 값 사용
+    const finalDx = touchCurrentX.current - touchStartX.current;
+    if (directionLocked.current === 'h' && finalDx > 80 && !successFiredRef.current) {
       successFiredRef.current = true;
       setDismissed(true);
-      setTimeout(onSuccess, 320);
+      setTimeout(onSuccess, 300);
     } else {
       setOffsetX(0);
     }
     directionLocked.current = null;
   }
 
-  if (dismissed) return null;
-
   const progress = Math.min(offsetX / 120, 1);
   const timeStr = format(parseISO(challenge.lastBlockedAt), 'M월 d일', { locale: ko });
 
+  // dismissed일 때 null 반환 대신 CSS transform으로 처리 — 애니메이션 재생 보장
   return (
     <div
       ref={cardRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       style={{
-        transform: dismissed
-          ? 'translateX(110%)'
-          : `translateX(${offsetX}px)`,
+        transform: dismissed ? 'translateX(110%)' : `translateX(${offsetX}px)`,
         transition: dismissed
           ? 'transform 0.3s ease-in'
           : offsetX === 0
-          ? 'transform 0.25s ease-out'
+          ? 'transform 0.2s ease-out'
           : 'none',
         touchAction: 'pan-y',
+        pointerEvents: dismissed ? 'none' : 'auto',
       }}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMoveReact}
-      onTouchEnd={handleTouchEnd}
       className="relative bg-white rounded-2xl px-4 py-3.5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden select-none"
     >
-      {/* Swipe hint overlay */}
       <div
         className="absolute inset-0 bg-teal-50 rounded-2xl flex items-center px-5 pointer-events-none"
         style={{ opacity: progress }}
@@ -116,7 +116,6 @@ function SwipeableChallengeCard({
         </div>
       </div>
 
-      {/* Swipe instruction */}
       <p className="text-xs text-gray-300 mt-2.5">→ 오른쪽으로 밀면 성공으로 기록</p>
     </div>
   );
