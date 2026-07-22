@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ClipboardPen, ScrollText, Lightbulb, Target, LogOut } from 'lucide-react';
+import { ClipboardPen, ScrollText, Lightbulb, Target, LogOut, Stethoscope, ChevronRight } from 'lucide-react';
 import {
   onAuthStateChanged, signInWithPopup, signOut, type User,
 } from 'firebase/auth';
@@ -14,20 +14,24 @@ import StatsPanel from './components/StatsPanel';
 import ExportButton from './components/ExportButton';
 import QuickLogInput from './components/QuickLogInput';
 import ChallengeList from './components/ChallengeList';
+import DiagnosticPanel from './components/DiagnosticPanel';
+import DiagnosticTest from './components/DiagnosticTest';
 import './index.css';
 
-type Tab = 'record' | 'log' | 'challenge' | 'stats';
+type Tab = 'record' | 'log' | 'challenge' | 'diagnostic' | 'stats';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'record',    label: '기록하기',  icon: <ClipboardPen size={22} /> },
-  { id: 'log',       label: '나의 기록', icon: <ScrollText size={22} /> },
-  { id: 'challenge', label: '도전 단어', icon: <Target size={22} /> },
-  { id: 'stats',     label: '인사이트',  icon: <Lightbulb size={22} /> },
+  { id: 'record',     label: '기록하기',  icon: <ClipboardPen size={20} /> },
+  { id: 'log',        label: '나의 기록', icon: <ScrollText size={20} /> },
+  { id: 'challenge',  label: '도전 단어', icon: <Target size={20} /> },
+  { id: 'diagnostic', label: '진단',      icon: <Stethoscope size={20} /> },
+  { id: 'stats',      label: '인사이트',  icon: <Lightbulb size={20} /> },
 ];
 
 // Provider 안에서 실제 앱 렌더링 (useLogStore 사용 가능)
 function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('record');
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
   const { addEntry, loading } = useLogStore();
 
   async function handleAdd(entry: Omit<LogEntry, 'id' | 'createdAt'>) {
@@ -69,6 +73,7 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
         <div className="max-w-lg mx-auto px-4 pt-4 pb-32">
           {activeTab === 'record' && (
             <div className="space-y-4">
+              <DiagnosticCard onStart={() => setShowDiagnostic(true)} />
               <QuickLogInput />
               <div>
                 <p className="text-xs font-semibold text-gray-400 mb-3 px-1">상세 기록</p>
@@ -76,11 +81,20 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
               </div>
             </div>
           )}
-          {activeTab === 'log'       && <LogList />}
-          {activeTab === 'challenge' && <ChallengeList />}
-          {activeTab === 'stats'     && <StatsPanel />}
+          {activeTab === 'log'        && <LogList />}
+          {activeTab === 'challenge'  && <ChallengeList />}
+          {activeTab === 'diagnostic' && <DiagnosticPanel onStart={() => setShowDiagnostic(true)} />}
+          {activeTab === 'stats'      && <StatsPanel />}
         </div>
       </main>
+
+      {/* ── 자가 진단 테스트 (전체 화면) ── */}
+      {showDiagnostic && (
+        <DiagnosticTest
+          onClose={() => setShowDiagnostic(false)}
+          onSaved={() => setActiveTab('diagnostic')}
+        />
+      )}
 
       {/* ── 하단 탭 바 (iOS 플로팅) ── */}
       <nav className="fixed bottom-0 inset-x-0 z-10 px-4 pb-5">
@@ -90,7 +104,7 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={[
-                'flex-1 flex flex-col items-center justify-center gap-1 py-3.5 text-xs font-medium transition-all duration-150 rounded-2xl',
+                'flex-1 flex flex-col items-center justify-center gap-1 py-3.5 text-[11px] font-medium whitespace-nowrap transition-all duration-150 rounded-2xl',
                 activeTab === tab.id
                   ? 'text-teal-600 bg-teal-50/60'
                   : 'text-gray-400 hover:text-gray-500',
@@ -104,6 +118,25 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
       </nav>
 
     </div>
+  );
+}
+
+// 대시보드 상단의 자가 진단 유도 카드
+function DiagnosticCard({ onStart }: { onStart: () => void }) {
+  return (
+    <button
+      onClick={onStart}
+      className="w-full flex items-center gap-3 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-600 text-white px-4 py-3.5 shadow-[0_8px_30px_rgba(13,148,136,0.25)] hover:from-teal-600 hover:to-teal-700 transition-all text-left"
+    >
+      <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20 shrink-0">
+        <Stethoscope size={22} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold">자가 진단 테스트</p>
+        <p className="text-xs text-teal-50/90 mt-0.5">나의 막힘 유형을 찾고 맞춤 전략 받기</p>
+      </div>
+      <ChevronRight size={20} className="shrink-0 opacity-80" />
+    </button>
   );
 }
 

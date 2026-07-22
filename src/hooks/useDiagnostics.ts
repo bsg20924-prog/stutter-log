@@ -1,0 +1,44 @@
+import { useEffect, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  collection, doc, setDoc, onSnapshot, query, orderBy, limit,
+} from 'firebase/firestore';
+import { db } from '../firebase';
+import { DiagnosticResult } from '../utils/diagnostic';
+
+const COLLECTION = 'diagnostics';
+
+// 완료된 진단 결과를 저장하고, id/createdAt 이 채워진 전체 결과를 반환.
+export async function saveDiagnosticResult(
+  result: Omit<DiagnosticResult, 'id' | 'createdAt'>,
+): Promise<DiagnosticResult> {
+  const full: DiagnosticResult = {
+    ...result,
+    id: uuidv4(),
+    createdAt: new Date().toISOString(),
+  };
+  await setDoc(doc(db, COLLECTION, full.id), full);
+  return full;
+}
+
+// 가장 최근 진단(기준선)을 구독.
+export function useLatestDiagnostic(): { latest: DiagnosticResult | null; loading: boolean } {
+  const [latest, setLatest] = useState<DiagnosticResult | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'), limit(1));
+    const unsub = onSnapshot(
+      q,
+      snapshot => {
+        const docSnap = snapshot.docs[0];
+        setLatest(docSnap ? (docSnap.data() as DiagnosticResult) : null);
+        setLoading(false);
+      },
+      () => setLoading(false), // 오류 시에도 로딩 해제 — 진단 시작 화면은 정상 노출
+    );
+    return () => unsub();
+  }, []);
+
+  return { latest, loading };
+}

@@ -15,6 +15,11 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
+    // 자가 진단 결과(기준선/이력)
+    match /diagnostics/{docId} {
+      allow read, write: if isOwner();
+    }
+
     // 그 외 경로는 모두 차단
     match /{document=**} {
       allow read, write: if false;
