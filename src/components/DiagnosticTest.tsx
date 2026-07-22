@@ -5,6 +5,8 @@ import {
   computeDiagnosticResult, DiagnosticResult, WordResponse,
 } from '../utils/diagnostic';
 import { saveDiagnosticResult } from '../hooks/useDiagnostics';
+import { useLogStore } from '../hooks/useLogStore';
+import { getActiveChallengeWords } from '../utils/challenge';
 import DiagnosticResultView from './DiagnosticResultView';
 
 type Stage = 'test' | 'result';
@@ -22,12 +24,38 @@ export default function DiagnosticTest({
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
+  const { entries, addEntry } = useLogStore();
 
   const words = unifiedDiagnosticWords;
+
+  // 막힌 단어를 도전 단어 목록에 자동 추가 (이미 활성 도전 단어면 건너뜀).
+  // 도전 단어는 로그에서 파생되므로, 'blocked' 로그를 남기는 방식으로 추가한다.
+  async function addBlockedToChallenges(blockedWords: string[]) {
+    const active = new Set(
+      getActiveChallengeWords(entries).map(c => c.word.trim().toLowerCase()),
+    );
+    const toAdd = [...new Set(blockedWords.map(w => w.trim()))]
+      .filter(w => w && !active.has(w.toLowerCase()));
+
+    await Promise.allSettled(
+      toAdd.map(word => addEntry({
+        word,
+        blockedSyllables: [],
+        phonemes: [],
+        situations: [],
+        outcome: '',
+        status: 'blocked',
+        isDetailed: false,
+        note: '자가 진단에서 막힘',
+      })),
+    );
+  }
 
   async function finish(finalResponses: Record<string, WordResponse>) {
     const computed = computeDiagnosticResult(finalResponses);
     setStage('result');
+    // 막힌 단어를 도전 단어로 자동 추가 (결과 표시를 막지 않도록 병렬 진행)
+    addBlockedToChallenges(computed.blockedWords);
     try {
       const saved = await saveDiagnosticResult(computed);
       setResult(saved);

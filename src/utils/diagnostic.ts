@@ -40,6 +40,16 @@ const WORD_MECHANISMS: MechanismId[] = [
   'airflow-glottal', 'laryngeal-tension', 'articulatory-forcing',
 ];
 
+// 전략 → 소속 메커니즘 (MECHANISMS 의 역방향). 연습 단어를 고를 때 사용.
+const STRATEGY_TO_MECHANISM: Partial<Record<StrategyId, MechanismId>> = Object.fromEntries(
+  (Object.entries(MECHANISMS) as [MechanismId, { strategies: StrategyId[] }][])
+    .flatMap(([mech, { strategies }]) => strategies.map(s => [s, mech])),
+);
+
+export function mechanismOfStrategy(id: StrategyId): MechanismId | undefined {
+  return STRATEGY_TO_MECHANISM[id];
+}
+
 export interface GroupStat {
   groupId: string;
   label: string;
@@ -71,6 +81,8 @@ export interface DiagnosticResult {
   mechanismStats: MechanismStat[];
   // 발음 기관(조음 위치)별 막힘 횟수 — ArticulationMap 히트맵용
   zoneBlockage: Record<ArticulationZone, number>;
+  // 이번 테스트에서 "막힘"으로 표시된 단어들 — 도전 단어 자동 추가 / 10초 연습용
+  blockedWords: string[];
   recommendedStrategies: StrategyId[];
 }
 
@@ -95,6 +107,7 @@ export function computeDiagnosticResult(
   const groupAgg = new Map<string, { answered: number; blocked: number }>();
   const mechAgg = new Map<MechanismId, { answered: number; blocked: number }>();
   const zoneBlockage = emptyZoneBlockage();
+  const blockedWords: string[] = [];
   let answered = 0, blocked = 0, skipped = 0;
 
   for (const w of words) {
@@ -102,7 +115,7 @@ export function computeDiagnosticResult(
     if (r === 'skip' || r === undefined) { skipped += 1; continue; }
     const isBlocked = r === 'blocked';
     answered += 1;
-    if (isBlocked) { blocked += 1; zoneBlockage[w.zone] += 1; }
+    if (isBlocked) { blocked += 1; zoneBlockage[w.zone] += 1; blockedWords.push(w.word); }
 
     // 표시용 카테고리(displayGroupId)로 집계 — 영어 단어도 한국어 버킷에 합쳐진다
     const g = groupAgg.get(w.displayGroupId) ?? { answered: 0, blocked: 0 };
@@ -153,6 +166,7 @@ export function computeDiagnosticResult(
     groupStats,
     mechanismStats,
     zoneBlockage,
+    blockedWords,
     recommendedStrategies,
   };
 }
