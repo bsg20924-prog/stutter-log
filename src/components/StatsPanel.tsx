@@ -11,6 +11,7 @@ import {
   getFearGapStats, getTacticInsights,
 } from '../utils/analytics';
 import { getZoneFrequency } from '../utils/phonetics';
+import { getTacticLabel } from '../data/strategies';
 import ArticulationMap from './ArticulationMap';
 
 const CHART_STYLE = { fontSize: 11, fill: '#64748b' };
@@ -178,7 +179,7 @@ export default function StatsPanel() {
           <p className="text-xs text-teal-500 mb-3">편안한 흐름과 함께 기록된 전략들이에요.</p>
           <div className="space-y-3">
             {tacticInsights.map(t => {
-              const label = t.tactic.replace(/_/g, ' ');
+              const label = getTacticLabel(t.tactic);
               const pct = Math.round(t.comfortableRatio * 100);
               return (
                 <div key={t.tactic}>

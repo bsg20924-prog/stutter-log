@@ -1,6 +1,7 @@
 import { Download } from 'lucide-react';
 import { useLogStore } from '../hooks/useLogStore';
 import { LogEntry } from '../types';
+import { getTacticLabel } from '../data/strategies';
 
 const STATUS_LABEL: Record<string, string> = {
   avoided:  '회피함',
@@ -33,7 +34,7 @@ function toCSV(entries: LogEntry[]): string {
       STATUS_LABEL[e.status ?? 'blocked'] ?? '막혔음',
       e.expectedFear ?? '',
       e.actualDifficulty ?? '',
-      (e.tactics ?? []).map(t => t.replace(/_/g, ' ')).join('/'),
+      (e.tactics ?? []).map(getTacticLabel).join('/'),
     ].map(escape).join(',')
   );
 

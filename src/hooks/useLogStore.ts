@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { LogEntry, LogStatus, OutcomeTag, TacticTag } from '../types';
+import { VALID_TACTIC_IDS } from '../data/strategies';
 
 const SITUATION_MAP: Record<string, LogEntry['situations'][number]> = {
   카페_주문:  '주문/결제',
@@ -28,11 +29,6 @@ const OUTCOME_MAP: Record<string, LogEntry['outcome']> = {
 };
 
 const VALID_STATUSES = new Set<LogStatus>(['avoided', 'blocked', 'overcome']);
-
-const VALID_TACTICS = new Set<TacticTag>([
-  '호흡_조절', '천천히_시작', '첫_음절_늘리기',
-  '리듬_타기', '성공_기억_떠올리기', '다른_단어_우회',
-]);
 
 function sanitizeRating(value: unknown): number | undefined {
   if (value === null || value === undefined) return undefined;
@@ -93,7 +89,7 @@ function migrate(data: Record<string, unknown>): LogEntry {
   const tactics: TacticTag[] = Array.isArray(data.tactics)
     ? (data.tactics as unknown[])
         .map(t => String(t))
-        .filter(t => VALID_TACTICS.has(t as TacticTag)) as TacticTag[]
+        .filter(t => VALID_TACTIC_IDS.has(t as TacticTag)) as TacticTag[]
     : [];
 
   return {

@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react';
 import { ChevronDown, Plus, X } from 'lucide-react';
-import { LogEntry, SituationTag, OutcomeTag, LogStatus, TacticTag } from '../types';
+import { LogEntry, SituationTag, OutcomeTag, LogStatus, TacticTag, StrategyId } from '../types';
 import { decomposeSyllable } from '../utils/korean';
+import StrategyPicker from './StrategyPicker';
 
 const SITUATION_OPTIONS: { value: SituationTag; label: string }[] = [
   { value: '전화',           label: '전화' },
@@ -29,15 +30,6 @@ const OUTCOME_OPTIONS: {
   { value: '상대가_대신_말함',     label: '상대가 대신 말함',     dot: 'bg-red-400',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-50 text-red-700 border border-red-300 font-medium' },
   { value: '중간에_포기함',        label: '중간에 포기함',        dot: 'bg-red-400',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-50 text-red-700 border border-red-300 font-medium' },
   { value: '아예_회피함',          label: '아예 회피함',          dot: 'bg-red-600',     base: 'bg-gray-50 text-gray-500 border border-gray-200',   active: 'bg-red-100 text-red-800 border border-red-400 font-semibold' },
-];
-
-const TACTIC_OPTIONS: { value: TacticTag; label: string }[] = [
-  { value: '호흡_조절',           label: '호흡 조절' },
-  { value: '천천히_시작',         label: '천천히 시작' },
-  { value: '첫_음절_늘리기',      label: '첫 음절 늘리기' },
-  { value: '리듬_타기',           label: '리듬 타기' },
-  { value: '성공_기억_떠올리기',  label: '성공 기억 떠올리기' },
-  { value: '다른_단어_우회',      label: '다른 단어 우회' },
 ];
 
 const STATUS_OPTIONS: { value: LogStatus; label: string; activeClass: string }[] = [
@@ -114,6 +106,12 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
   function toggleSituation(tag: SituationTag) {
     setSituations(prev =>
       prev.includes(tag) ? prev.filter(s => s !== tag) : [...prev, tag]
+    );
+  }
+
+  function toggleTactic(id: StrategyId) {
+    setTactics(prev =>
+      prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
     );
   }
 
@@ -421,30 +419,9 @@ export default function LogForm({ onSubmit, initialValues, onCancel }: Props) {
           {/* 전략 */}
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-2">
-              어떤 방법을 시도했나요? <span className="text-gray-400 font-normal">(선택)</span>
+              어떤 방법을 시도했나요? <span className="text-gray-400 font-normal">(선택 · ⓘ를 눌러 방법 확인)</span>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {TACTIC_OPTIONS.map(opt => {
-                const selected = tactics.includes(opt.value);
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() =>
-                      setTactics(prev =>
-                        selected ? prev.filter(t => t !== opt.value) : [...prev, opt.value]
-                      )
-                    }
-                    className={[
-                      'rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-150',
-                      selected ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-500',
-                    ].join(' ')}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
+            <StrategyPicker selected={tactics} onToggle={toggleTactic} />
           </div>
 
           <div>
