@@ -199,16 +199,20 @@ export default function App() {
     }
   }
 
-  if (checking) {
-    return <CenterMessage><p className="text-gray-400 text-sm">불러오는 중...</p></CenterMessage>;
-  }
+  // 개발 서버(npm run dev)에서만 로그인 게이트를 건너뛴다.
+  // import.meta.env.DEV 는 프로덕션 빌드에서 false 이므로 배포에는 영향 없음.
+  const bypassAuth = import.meta.env.DEV;
 
-  if (!user) {
-    return <SignInScreen onSignIn={handleSignIn} error={authError} />;
-  }
-
-  if (user.email !== OWNER_EMAIL) {
-    return <UnauthorizedScreen email={user.email} onSignOut={() => signOut(auth)} />;
+  if (!bypassAuth) {
+    if (checking) {
+      return <CenterMessage><p className="text-gray-400 text-sm">불러오는 중...</p></CenterMessage>;
+    }
+    if (!user) {
+      return <SignInScreen onSignIn={handleSignIn} error={authError} />;
+    }
+    if (user.email !== OWNER_EMAIL) {
+      return <UnauthorizedScreen email={user.email} onSignOut={() => signOut(auth)} />;
+    }
   }
 
   return (
