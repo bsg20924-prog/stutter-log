@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ClipboardPen, ScrollText, Lightbulb, Target } from 'lucide-react';
+import { ClipboardPen, ScrollText, Lightbulb, Target, LogOut } from 'lucide-react';
+import {
+  onAuthStateChanged, signInWithPopup, signOut, type User,
+} from 'firebase/auth';
+import { auth, googleProvider, OWNER_EMAIL } from './firebase';
 import { LogStoreProvider, useLogStore } from './hooks/useLogStore';
 import { LogEntry } from './types';
 import LogForm from './components/LogForm';
@@ -22,7 +26,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 // Provider 안에서 실제 앱 렌더링 (useLogStore 사용 가능)
-function AppShell() {
+function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('record');
   const { addEntry, loading } = useLogStore();
 
@@ -48,8 +52,15 @@ function AppShell() {
       <header className="shrink-0 flex items-center gap-2 px-4 h-14 bg-white shadow-sm z-10">
         <h1 className="font-bold text-base tracking-wide text-gray-800">말막힘 일지</h1>
         <span className="text-gray-400 text-xs">{today}</span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
           <ExportButton />
+          <button
+            onClick={onSignOut}
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            aria-label="로그아웃"
+          >
+            <LogOut size={18} />
+          </button>
         </div>
       </header>
 
@@ -96,10 +107,80 @@ function AppShell() {
   );
 }
 
+function CenterMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-center h-dvh bg-gray-50">
+      <div className="text-center px-6">{children}</div>
+    </div>
+  );
+}
+
+function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error: string | null }) {
+  return (
+    <CenterMessage>
+      <h1 className="font-bold text-lg text-gray-800 mb-1">말막힘 일지</h1>
+      <p className="text-gray-400 text-sm mb-6">내 기록은 나만 볼 수 있어요.</p>
+      <button
+        onClick={onSignIn}
+        className="rounded-xl px-5 py-3 text-sm font-semibold bg-teal-500 text-white hover:bg-teal-600 transition-colors"
+      >
+        Google로 로그인
+      </button>
+      {error && <p className="text-red-500 text-xs mt-4">{error}</p>}
+    </CenterMessage>
+  );
+}
+
+function UnauthorizedScreen({ email, onSignOut }: { email: string | null; onSignOut: () => void }) {
+  return (
+    <CenterMessage>
+      <p className="text-4xl mb-3">🔒</p>
+      <p className="text-gray-600 text-sm mb-1">이 계정으로는 접근할 수 없어요.</p>
+      {email && <p className="text-gray-400 text-xs mb-6">{email}</p>}
+      <button
+        onClick={onSignOut}
+        className="rounded-xl px-5 py-2.5 text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+      >
+        다른 계정으로 로그인
+      </button>
+    </CenterMessage>
+  );
+}
+
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => onAuthStateChanged(auth, u => {
+    setUser(u);
+    setChecking(false);
+  }), []);
+
+  async function handleSignIn() {
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch {
+      setAuthError('로그인에 실패했어요. 다시 시도해 주세요.');
+    }
+  }
+
+  if (checking) {
+    return <CenterMessage><p className="text-gray-400 text-sm">불러오는 중...</p></CenterMessage>;
+  }
+
+  if (!user) {
+    return <SignInScreen onSignIn={handleSignIn} error={authError} />;
+  }
+
+  if (user.email !== OWNER_EMAIL) {
+    return <UnauthorizedScreen email={user.email} onSignOut={() => signOut(auth)} />;
+  }
+
   return (
     <LogStoreProvider>
-      <AppShell />
+      <AppShell onSignOut={() => signOut(auth)} />
     </LogStoreProvider>
   );
 }

@@ -25,6 +25,7 @@ export default function QuickLogInput() {
   const [selectedSyllable, setSelectedSyllable] = useState<string | null>(null);
   const [selectedPhoneme, setSelectedPhoneme] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { addEntry } = useLogStore();
 
   const syllables = useMemo(() => extractSyllables(word), [word]);
@@ -57,19 +58,26 @@ export default function QuickLogInput() {
     const trimmed = word.trim();
     if (!trimmed || saving) return;
     setSaving(true);
-    await addEntry({
-      word: trimmed,
-      blockedSyllables: selectedSyllable ? [selectedSyllable] : [],
-      phonemes: selectedPhoneme ? [selectedPhoneme] : [],
-      situations: [],
-      outcome: '',
-      status,
-      isDetailed: false,
-    });
-    setWord('');
-    setSelectedSyllable(null);
-    setSelectedPhoneme('');
-    setSaving(false);
+    setError(null);
+    try {
+      await addEntry({
+        word: trimmed,
+        blockedSyllables: selectedSyllable ? [selectedSyllable] : [],
+        phonemes: selectedPhoneme ? [selectedPhoneme] : [],
+        situations: [],
+        outcome: '',
+        status,
+        isDetailed: false,
+      });
+      setWord('');
+      setSelectedSyllable(null);
+      setSelectedPhoneme('');
+    } catch {
+      // 저장 실패(예: 오프라인) — 입력값은 유지하고 다시 시도할 수 있게 안내
+      setError('저장에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -118,6 +126,8 @@ export default function QuickLogInput() {
           <CornerDownLeft size={13} />
         </button>
       </div>
+
+      {error && <p className="text-xs text-red-500 px-1">{error}</p>}
 
       {/* 음절 칩 */}
       {syllables.length > 0 && (

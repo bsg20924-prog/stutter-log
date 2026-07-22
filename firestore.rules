@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 소유자 계정(Google 로그인)만 읽기/쓰기 허용.
+    // src/firebase.ts 의 OWNER_EMAIL 과 반드시 동일하게 유지할 것.
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email == 'bsg20924@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    match /logs/{docId} {
+      allow read, write: if isOwner();
+    }
+
+    // 그 외 경로는 모두 차단
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
