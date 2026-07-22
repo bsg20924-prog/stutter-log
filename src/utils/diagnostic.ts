@@ -1,8 +1,9 @@
 import { StrategyId } from '../types';
 import {
   DiagnosticLanguage, MechanismId,
-  getDiagnosticWords, getDiagnosticGroup,
+  unifiedDiagnosticWords, getDiagnosticGroup,
 } from '../data/diagnosticWords';
+import { ArticulationZone, ZONES } from './phonetics';
 
 export type WordResponse = 'blocked' | 'clear' | 'skip';
 
@@ -59,7 +60,8 @@ export interface MechanismStat {
 export interface DiagnosticResult {
   id: string;
   createdAt: string;
-  language: DiagnosticLanguage;
+  // 'unified' = 언어 통합 진단. 'ko'/'en' 은 예전 기록 호환용.
+  language: DiagnosticLanguage | 'unified';
   totalWords: number;
   answered: number;
   blocked: number;
@@ -67,6 +69,8 @@ export interface DiagnosticResult {
   overallRate: number; // 0..1 (답한 단어 기준)
   groupStats: GroupStat[];
   mechanismStats: MechanismStat[];
+  // 발음 기관(조음 위치)별 막힘 횟수 — ArticulationMap 히트맵용
+  zoneBlockage: Record<ArticulationZone, number>;
   recommendedStrategies: StrategyId[];
 }
 
@@ -77,15 +81,20 @@ function rate(blocked: number, answered: number): number {
   return answered > 0 ? blocked / answered : 0;
 }
 
+function emptyZoneBlockage(): Record<ArticulationZone, number> {
+  return { 입술: 0, 혀끝: 0, 입천장: 0, 연구개: 0, 성대: 0 };
+}
+
 // 답변 기록으로부터 진단 결과(집계 + 추천)를 계산. id/createdAt 은 저장 시 부여.
+// 언어 구분 없이 통합 단어 세트(unifiedDiagnosticWords)로 진행한다.
 export function computeDiagnosticResult(
-  language: DiagnosticLanguage,
   responses: Record<string, WordResponse>,
 ): Omit<DiagnosticResult, 'id' | 'createdAt'> {
-  const words = getDiagnosticWords(language);
+  const words = unifiedDiagnosticWords;
 
   const groupAgg = new Map<string, { answered: number; blocked: number }>();
   const mechAgg = new Map<MechanismId, { answered: number; blocked: number }>();
+  const zoneBlockage = emptyZoneBlockage();
   let answered = 0, blocked = 0, skipped = 0;
 
   for (const w of words) {
@@ -93,10 +102,11 @@ export function computeDiagnosticResult(
     if (r === 'skip' || r === undefined) { skipped += 1; continue; }
     const isBlocked = r === 'blocked';
     answered += 1;
-    if (isBlocked) blocked += 1;
+    if (isBlocked) { blocked += 1; zoneBlockage[w.zone] += 1; }
 
-    const g = groupAgg.get(w.groupId) ?? { answered: 0, blocked: 0 };
-    groupAgg.set(w.groupId, { answered: g.answered + 1, blocked: g.blocked + (isBlocked ? 1 : 0) });
+    // 표시용 카테고리(displayGroupId)로 집계 — 영어 단어도 한국어 버킷에 합쳐진다
+    const g = groupAgg.get(w.displayGroupId) ?? { answered: 0, blocked: 0 };
+    groupAgg.set(w.displayGroupId, { answered: g.answered + 1, blocked: g.blocked + (isBlocked ? 1 : 0) });
 
     const m = mechAgg.get(w.mechanism) ?? { answered: 0, blocked: 0 };
     mechAgg.set(w.mechanism, { answered: m.answered + 1, blocked: m.blocked + (isBlocked ? 1 : 0) });
@@ -134,7 +144,7 @@ export function computeDiagnosticResult(
   const recommendedStrategies = recommend(mechanismStats, overallRate);
 
   return {
-    language,
+    language: 'unified',
     totalWords: words.length,
     answered,
     blocked,
@@ -142,6 +152,7 @@ export function computeDiagnosticResult(
     overallRate,
     groupStats,
     mechanismStats,
+    zoneBlockage,
     recommendedStrategies,
   };
 }
@@ -171,6 +182,24 @@ function recommend(mechanismStats: MechanismStat[], overallRate: number): Strate
   }
 
   return [...new Set(recs)].slice(0, 3);
+}
+
+// 조음 위치별 해석 문구 (히트맵 아래 표시)
+const ZONE_INTERPRETATION: Record<ArticulationZone, string> = {
+  성대:   '성대/후두 부위의 막힘 밀도가 가장 높습니다. 발살바 메커니즘 이완(복부 힘 빼기)과 부드러운 시작을 추천합니다.',
+  연구개: '연구개(목 안쪽) 부위의 막힘 밀도가 가장 높습니다. 하품-한숨 자세로 후두를 열고 연속 발성을 추천합니다.',
+  입술:   '입술(양순) 부위의 막힘 밀도가 가장 높습니다. 입술 힘을 뺀 가벼운 접촉(경조음)을 추천합니다.',
+  혀끝:   '혀끝(치조) 부위의 막힘 밀도가 가장 높습니다. 가벼운 접촉과 턱 이완으로 힘을 빼보세요.',
+  입천장: '입천장(경구개) 부위의 막힘 밀도가 가장 높습니다. 연속 발성으로 소리를 부드럽게 이어보세요.',
+};
+
+// 히트맵 아래에 보여줄 해석. 막힘이 전혀 없으면 null.
+export function getZoneInterpretation(
+  zoneBlockage: Record<ArticulationZone, number>,
+): { topZone: ArticulationZone; text: string } | null {
+  const top = [...ZONES].sort((a, b) => zoneBlockage[b] - zoneBlockage[a])[0];
+  if (!top || zoneBlockage[top] <= 0) return null;
+  return { topZone: top, text: ZONE_INTERPRETATION[top] };
 }
 
 // 결과 요약 한 줄 (예: "후두 긴장 유형이 가장 두드러져요 · 75% 막힘")

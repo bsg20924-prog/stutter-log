@@ -59,14 +59,32 @@ function laserGlow(color: string, isTop: boolean, isActive: boolean): string {
   ].join(', ');
 }
 
-interface Props {
-  frequency: Record<ArticulationZone, number>;
+// heat 모드: 막힘 강도(최댓값 대비)에 따라 노랑→주황→빨강으로 채색
+function heatColor(freq: number, max: number): string {
+  if (freq <= 0) return '#d1d5db';       // 회색 — 막힘 없음
+  const t = max > 0 ? freq / max : 0;
+  if (t >= 0.999) return '#ef4444';      // 빨강 — 최다 막힘
+  if (t >= 0.6)   return '#f97316';      // 주황
+  if (t >= 0.3)   return '#f59e0b';      // 진노랑
+  return '#facc15';                      // 노랑 — 약한 막힘
 }
 
-export default function ArticulationMap({ frequency }: Props) {
+interface Props {
+  frequency: Record<ArticulationZone, number>;
+  // 진단 결과처럼 강도 기반 빨강/주황 히트맵으로 표시할 때 true.
+  // StatsPanel 등 기본 사용처는 지정하지 않아 기존 고정 색상을 유지한다.
+  heat?: boolean;
+}
+
+export default function ArticulationMap({ frequency, heat = false }: Props) {
   const total   = ZONES.reduce((s, z) => s + frequency[z], 0);
   const sorted  = [...ZONES].sort((a, b) => frequency[b] - frequency[a]);
   const topZone = total > 0 ? sorted[0] : null;
+  const maxFreq = total > 0 ? frequency[sorted[0]] : 0;
+
+  // 표시 색상: heat 모드면 강도색, 아니면 부위별 고정색
+  const colorOf = (z: ArticulationZone): string =>
+    heat ? heatColor(frequency[z], maxFreq) : ZONE_COLOR[z];
 
   /** 코어 도트 크기 — 작고 정밀하게 (max 13px) */
   const corePx = (z: ArticulationZone): number => {
@@ -119,7 +137,7 @@ export default function ArticulationMap({ frequency }: Props) {
           const { x, y } = ZONE_PCT[zone];
           const isTop    = zone === topZone;
           const isActive = !isTop && frequency[zone] > 0;
-          const color    = ZONE_COLOR[zone];
+          const color    = colorOf(zone);
           const sz       = corePx(zone);
 
           return (
@@ -188,13 +206,13 @@ export default function ArticulationMap({ frequency }: Props) {
             return (
               <div key={zone} className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: ZONE_COLOR[zone] }}/>
+                  style={{ backgroundColor: colorOf(zone) }}/>
                 <span className="text-xs font-medium text-gray-600 w-14 shrink-0">
                   {zone}
                 </span>
                 <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%`, backgroundColor: ZONE_COLOR[zone] }}/>
+                    style={{ width: `${pct}%`, backgroundColor: colorOf(zone) }}/>
                 </div>
                 <span className="text-xs text-gray-400 w-8 text-right shrink-0">
                   {pct}%

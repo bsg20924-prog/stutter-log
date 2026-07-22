@@ -21,8 +21,8 @@ export default function DiagnosticPanel({ onStart }: { onStart: () => void }) {
           <p className="text-3xl mb-3">🩺</p>
           <h2 className="text-base font-bold text-gray-800 mb-2">자가 진단 테스트</h2>
           <p className="text-xs text-gray-500 leading-relaxed mb-5">
-            여러 단어를 소리 내어 읽으며 어디서 막히는지 표시하면,<br />
-            당신만의 막힘 유형(공기·후두·조음)을 분석하고<br />
+            한국어·영어 28개 단어를 소리 내어 읽으며 어디서 막히는지 표시하면,<br />
+            당신만의 막힘 유형(공기·후두·조음)과 발음 기관 위치를 분석하고<br />
             맞춤 전략을 추천해 드려요. 약 2~3분 소요됩니다.
           </p>
           <button

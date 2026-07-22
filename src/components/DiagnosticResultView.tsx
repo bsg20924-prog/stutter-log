@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Info } from 'lucide-react';
-import { DiagnosticResult, summarizeResult } from '../utils/diagnostic';
+import { DiagnosticResult, summarizeResult, getZoneInterpretation } from '../utils/diagnostic';
 import { getStrategy, Strategy, STRATEGY_CATEGORIES, TEMPORARY_STARTER_TAG } from '../data/strategies';
 import StrategyDetailModal from './StrategyDetailModal';
+import ArticulationMap from './ArticulationMap';
 
 function rateStyle(rate: number): { bar: string; text: string } {
   if (rate >= 0.6) return { bar: 'bg-red-400', text: 'text-red-500' };
@@ -12,7 +13,7 @@ function rateStyle(rate: number): { bar: string; text: string } {
   return { bar: 'bg-teal-400', text: 'text-teal-600' };
 }
 
-const LANGUAGE_LABEL = { ko: '한국어', en: 'English' } as const;
+const LANGUAGE_LABEL = { ko: '한국어', en: 'English', unified: '통합' } as const;
 
 export default function DiagnosticResultView({ result }: { result: DiagnosticResult }) {
   const [detail, setDetail] = useState<Strategy | null>(null);
@@ -22,6 +23,10 @@ export default function DiagnosticResultView({ result }: { result: DiagnosticRes
   const recommended = result.recommendedStrategies
     .map(getStrategy)
     .filter((s): s is Strategy => Boolean(s));
+
+  // 예전 기록에는 zoneBlockage 가 없을 수 있으므로 방어적으로 처리
+  const zoneBlockage = result.zoneBlockage;
+  const interpretation = zoneBlockage ? getZoneInterpretation(zoneBlockage) : null;
 
   return (
     <div className="space-y-4">
@@ -70,6 +75,20 @@ export default function DiagnosticResultView({ result }: { result: DiagnosticRes
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* 발음 기관 히트맵 — 진단 막힘 위치를 빨강/주황으로 표시 */}
+      {zoneBlockage && result.blocked > 0 && (
+        <div className="space-y-2">
+          <ArticulationMap frequency={zoneBlockage} heat />
+          {interpretation && (
+            <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3">
+              <p className="text-xs text-orange-800 leading-relaxed">
+                🔥 {interpretation.text}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

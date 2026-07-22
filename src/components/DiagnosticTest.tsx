@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import { X, SkipForward, ChevronLeft, Check, Ban } from 'lucide-react';
-import {
-  DiagnosticLanguage, getDiagnosticWords, getDiagnosticGroup,
-} from '../data/diagnosticWords';
+import { unifiedDiagnosticWords, getDiagnosticGroup } from '../data/diagnosticWords';
 import {
   computeDiagnosticResult, DiagnosticResult, WordResponse,
 } from '../utils/diagnostic';
 import { saveDiagnosticResult } from '../hooks/useDiagnostics';
 import DiagnosticResultView from './DiagnosticResultView';
 
-type Stage = 'language' | 'test' | 'result';
+type Stage = 'test' | 'result';
 
 export default function DiagnosticTest({
   onClose,
@@ -18,25 +16,17 @@ export default function DiagnosticTest({
   onClose: () => void;
   onSaved?: () => void;
 }) {
-  const [stage, setStage] = useState<Stage>('language');
-  const [language, setLanguage] = useState<DiagnosticLanguage>('ko');
+  const [stage, setStage] = useState<Stage>('test');
   const [index, setIndex] = useState(0);
   const [responses, setResponses] = useState<Record<string, WordResponse>>({});
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
 
-  const words = getDiagnosticWords(language);
-
-  function startTest(lang: DiagnosticLanguage) {
-    setLanguage(lang);
-    setIndex(0);
-    setResponses({});
-    setStage('test');
-  }
+  const words = unifiedDiagnosticWords;
 
   async function finish(finalResponses: Record<string, WordResponse>) {
-    const computed = computeDiagnosticResult(language, finalResponses);
+    const computed = computeDiagnosticResult(finalResponses);
     setStage('result');
     try {
       const saved = await saveDiagnosticResult(computed);
@@ -88,13 +78,11 @@ export default function DiagnosticTest({
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-lg mx-auto px-4 py-5">
 
-          {stage === 'language' && <LanguageSelect onSelect={startTest} />}
-
           {stage === 'test' && (
             <TestRunner
               word={words[index].word}
-              groupLabel={getDiagnosticGroup(words[index].groupId)?.label ?? ''}
-              groupSub={getDiagnosticGroup(words[index].groupId)?.sublabel ?? ''}
+              groupLabel={getDiagnosticGroup(words[index].displayGroupId)?.label ?? ''}
+              groupSub={getDiagnosticGroup(words[index].displayGroupId)?.sublabel ?? ''}
               index={index}
               total={words.length}
               onAnswer={answer}
@@ -149,38 +137,6 @@ export default function DiagnosticTest({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function LanguageSelect({ onSelect }: { onSelect: (lang: DiagnosticLanguage) => void }) {
-  return (
-    <div className="space-y-4">
-      <div className="text-center pt-4 pb-2">
-        <p className="text-3xl mb-2">🩺</p>
-        <h2 className="text-lg font-bold text-gray-800">어떤 언어로 진단할까요?</h2>
-        <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-          단어를 소리 내어 읽고 막혔는지 표시하면,<br />
-          당신만의 막힘 유형과 맞춤 전략을 찾아드려요.
-        </p>
-      </div>
-
-      {[
-        { lang: 'ko' as const, title: '한국어 진단', sub: '모음·평음·된소리·거센소리 등 30단어', flag: '🇰🇷' },
-        { lang: 'en' as const, title: 'English Test', sub: 'Vowels · Plosives · Clusters, 25 words', flag: '🇺🇸' },
-      ].map(opt => (
-        <button
-          key={opt.lang}
-          onClick={() => onSelect(opt.lang)}
-          className="w-full flex items-center gap-3 bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] px-4 py-4 hover:ring-2 hover:ring-teal-300 transition-all text-left"
-        >
-          <span className="text-2xl">{opt.flag}</span>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-gray-800">{opt.title}</p>
-            <p className="text-xs text-gray-400 mt-0.5">{opt.sub}</p>
-          </div>
-        </button>
-      ))}
     </div>
   );
 }
