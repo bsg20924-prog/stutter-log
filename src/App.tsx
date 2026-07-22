@@ -16,6 +16,7 @@ import QuickLogInput from './components/QuickLogInput';
 import ChallengeList from './components/ChallengeList';
 import DiagnosticPanel from './components/DiagnosticPanel';
 import DiagnosticTest from './components/DiagnosticTest';
+import SoundMapTest from './components/SoundMapTest';
 import './index.css';
 
 type Tab = 'record' | 'log' | 'challenge' | 'diagnostic' | 'stats';
@@ -32,6 +33,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('record');
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [showSoundMap, setShowSoundMap] = useState(false);
   const { addEntry, loading } = useLogStore();
 
   async function handleAdd(entry: Omit<LogEntry, 'id' | 'createdAt'>) {
@@ -83,7 +85,12 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
           )}
           {activeTab === 'log'        && <LogList />}
           {activeTab === 'challenge'  && <ChallengeList />}
-          {activeTab === 'diagnostic' && <DiagnosticPanel onStart={() => setShowDiagnostic(true)} />}
+          {activeTab === 'diagnostic' && (
+            <DiagnosticPanel
+              onStart={() => setShowDiagnostic(true)}
+              onStartSoundMap={() => setShowSoundMap(true)}
+            />
+          )}
           {activeTab === 'stats'      && <StatsPanel />}
         </div>
       </main>
@@ -95,6 +102,9 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
           onSaved={() => setActiveTab('diagnostic')}
         />
       )}
+
+      {/* ── 소리 지도 만들기 (전체 화면, 베타) ── */}
+      {showSoundMap && <SoundMapTest onClose={() => setShowSoundMap(false)} />}
 
       {/* ── 하단 탭 바 (iOS 플로팅) ── */}
       <nav className="fixed bottom-0 inset-x-0 z-10 px-4 pb-5">

@@ -1,0 +1,71 @@
+// 소리 지도 만들기(Sound Map Test) — 3단계 압박 사다리 데이터/타입.
+// Part 1: UI 스켈레톤 & 상태 흐름용. 녹음/분석/저장 로직은 이후 파트에서 추가.
+
+export type SoundKind = 'vowel' | 'consonant' | 'custom';
+
+export interface SoundCard {
+  id: string;
+  text: string;   // 화면에 크게 표시할 소리/단어
+  kind: SoundKind;
+}
+
+// 말하기 단계의 자가 평가
+export type Assessment = 'smooth' | 'partial' | 'blocked';
+
+export const ASSESSMENTS: { value: Assessment; label: string; cls: string; activeCls: string }[] = [
+  { value: 'smooth',  label: '술술 나옴', cls: 'text-teal-600',   activeCls: 'bg-teal-500 text-white border-teal-500' },
+  { value: 'partial', label: '걸림',      cls: 'text-amber-600',  activeCls: 'bg-amber-400 text-white border-amber-400' },
+  { value: 'blocked', label: '막힘',      cls: 'text-red-600',    activeCls: 'bg-red-500 text-white border-red-500' },
+];
+
+// 4단계 (Step 0~3)
+export type SoundStepId = 'fear' | 'whisper' | 'normal' | 'recording';
+
+export interface SoundStep {
+  id: SoundStepId;
+  index: number;      // 0~3
+  short: string;      // 스테퍼용 짧은 라벨
+  title: string;      // 카드 상단 안내
+  prompt: string;     // 행동 지시
+}
+
+export const SOUND_STEPS: SoundStep[] = [
+  { id: 'fear',      index: 0, short: '예상 긴장', title: '말하기 전, 예상 긴장도', prompt: '이 소리, 얼마나 어렵게 느껴지나요?' },
+  { id: 'whisper',   index: 1, short: '속삭임',    title: '1단계 · 속삭임',        prompt: '속삭이듯 아주 작게 소리 내보세요.' },
+  { id: 'normal',    index: 2, short: '목소리',    title: '2단계 · 목소리',        prompt: '이제 평소 목소리로 말해보세요.' },
+  { id: 'recording', index: 3, short: '녹음',      title: '3단계 · 녹음 압박',     prompt: '녹음을 켠 상태로 말한다고 상상하며 말해보세요.' },
+];
+
+// 카드 하나에 대한 응답 (단계별)
+export interface SoundResponse {
+  fear?: number;            // 1~5
+  whisper?: Assessment;
+  normal?: Assessment;
+  recording?: Assessment;
+}
+
+// ── 기본 소리 세트 ─────────────────────────────────────────
+const VOWELS = ['아', '어', '오', '우', '으', '이'];
+
+// 평음 / 된소리 / 거센소리 대비 (핵심 자음 조합)
+const CONSONANTS = ['가', '까', '카', '바', '빠', '파', '사', '자'];
+
+export function buildDefaultCards(): SoundCard[] {
+  return [
+    ...VOWELS.map((t, i): SoundCard => ({ id: `vowel-${i + 1}`, text: t, kind: 'vowel' })),
+    ...CONSONANTS.map((t, i): SoundCard => ({ id: `consonant-${i + 1}`, text: t, kind: 'consonant' })),
+  ];
+}
+
+// 사용자가 추가하는 "무서운 단어" 추천 칩
+export const SUGGESTED_CUSTOM_WORDS = ['아메리카노', '전화', '제 이름'];
+
+export function makeCustomCard(text: string, seq: number): SoundCard {
+  return { id: `custom-${seq}-${text}`, text, kind: 'custom' };
+}
+
+export const KIND_LABEL: Record<SoundKind, string> = {
+  vowel: '모음',
+  consonant: '자음',
+  custom: '나의 단어',
+};

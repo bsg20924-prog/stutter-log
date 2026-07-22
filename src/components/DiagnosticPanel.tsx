@@ -1,8 +1,14 @@
-import { Stethoscope, RefreshCw } from 'lucide-react';
+import { Stethoscope, RefreshCw, Map as MapIcon, ChevronRight } from 'lucide-react';
 import { useLatestDiagnostic } from '../hooks/useDiagnostics';
 import DiagnosticResultView from './DiagnosticResultView';
 
-export default function DiagnosticPanel({ onStart }: { onStart: () => void }) {
+export default function DiagnosticPanel({
+  onStart,
+  onStartSoundMap,
+}: {
+  onStart: () => void;
+  onStartSoundMap: () => void;
+}) {
   const { latest, loading } = useLatestDiagnostic();
 
   if (loading) {
@@ -33,6 +39,7 @@ export default function DiagnosticPanel({ onStart }: { onStart: () => void }) {
             진단 시작하기
           </button>
         </div>
+        <SoundMapCard onStart={onStartSoundMap} />
       </div>
     );
   }
@@ -40,6 +47,7 @@ export default function DiagnosticPanel({ onStart }: { onStart: () => void }) {
   // 최근 기준선 결과 표시 + 재진단
   return (
     <div className="space-y-4">
+      <SoundMapCard onStart={onStartSoundMap} />
       <div className="flex items-center justify-between px-1">
         <h2 className="text-sm font-semibold text-gray-600">최근 진단 결과</h2>
         <button
@@ -52,5 +60,27 @@ export default function DiagnosticPanel({ onStart }: { onStart: () => void }) {
       </div>
       <DiagnosticResultView result={latest} />
     </div>
+  );
+}
+
+// 소리 지도 만들기 유도 카드 (베타)
+function SoundMapCard({ onStart }: { onStart: () => void }) {
+  return (
+    <button
+      onClick={onStart}
+      className="w-full flex items-center gap-3 rounded-2xl bg-white border border-teal-100 px-4 py-3.5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-teal-300 transition-all text-left"
+    >
+      <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-teal-50 text-teal-600 shrink-0">
+        <MapIcon size={20} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-bold text-gray-800">소리 지도 만들기</p>
+          <span className="text-[10px] font-medium text-teal-600 bg-teal-50 rounded-full px-1.5 py-0.5">베타</span>
+        </div>
+        <p className="text-xs text-gray-400 mt-0.5">속삭임 → 목소리 → 녹음, 3단계 압박 테스트</p>
+      </div>
+      <ChevronRight size={20} className="shrink-0 text-gray-300" />
+    </button>
   );
 }
