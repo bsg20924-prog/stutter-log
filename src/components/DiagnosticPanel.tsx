@@ -1,6 +1,9 @@
 import { Stethoscope, RefreshCw, Map as MapIcon, ChevronRight } from 'lucide-react';
 import { useLatestDiagnostic } from '../hooks/useDiagnostics';
+import { useLatestSoundMap } from '../hooks/useSoundMaps';
+import { SoundMapResult } from '../utils/soundMapResult';
 import DiagnosticResultView from './DiagnosticResultView';
+import SoundMapResultView from './SoundMapResultView';
 
 export default function DiagnosticPanel({
   onStart,
@@ -10,8 +13,9 @@ export default function DiagnosticPanel({
   onStartSoundMap: () => void;
 }) {
   const { latest, loading } = useLatestDiagnostic();
+  const { latest: soundMap, loading: soundMapLoading } = useLatestSoundMap();
 
-  if (loading) {
+  if (loading || soundMapLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <p className="text-gray-400 text-sm">불러오는 중...</p>
@@ -39,7 +43,7 @@ export default function DiagnosticPanel({
             진단 시작하기
           </button>
         </div>
-        <SoundMapCard onStart={onStartSoundMap} />
+        <SoundMapSection latest={soundMap} onStart={onStartSoundMap} />
       </div>
     );
   }
@@ -47,7 +51,7 @@ export default function DiagnosticPanel({
   // 최근 기준선 결과 표시 + 재진단
   return (
     <div className="space-y-4">
-      <SoundMapCard onStart={onStartSoundMap} />
+      <SoundMapSection latest={soundMap} onStart={onStartSoundMap} />
       <div className="flex items-center justify-between px-1">
         <h2 className="text-sm font-semibold text-gray-600">최근 진단 결과</h2>
         <button
@@ -59,6 +63,33 @@ export default function DiagnosticPanel({
         </button>
       </div>
       <DiagnosticResultView result={latest} />
+    </div>
+  );
+}
+
+// 소리 지도 영역 — 아직 없으면 시작 카드만, 있으면 최근 지도까지 보여준다.
+function SoundMapSection({
+  latest,
+  onStart,
+}: {
+  latest: SoundMapResult | null;
+  onStart: () => void;
+}) {
+  if (!latest) return <SoundMapCard onStart={onStart} />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-sm font-semibold text-gray-600">최근 소리 지도</h2>
+        <button
+          onClick={onStart}
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-teal-50 text-teal-600 border border-teal-200 hover:bg-teal-100 transition-colors"
+        >
+          <RefreshCw size={13} />
+          다시 만들기
+        </button>
+      </div>
+      <SoundMapResultView result={latest} />
     </div>
   );
 }

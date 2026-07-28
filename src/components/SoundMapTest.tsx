@@ -1,12 +1,17 @@
-import { useState, useEffect, KeyboardEvent } from 'react';
+import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { X, ChevronLeft, Plus, Map as MapIcon } from 'lucide-react';
 import {
   SoundCard, SoundResponse, Assessment, SoundStepId, RecordingMode,
-  SOUND_STEPS, ASSESSMENTS, KIND_LABEL,
+  SOUND_STEPS, ASSESSMENTS, UNKNOWN_ASSESSMENT, KIND_LABEL,
   buildDefaultCards, makeCustomCard, SUGGESTED_CUSTOM_WORDS,
 } from '../data/soundMap';
 import { useMicPressure, MicPressure } from '../hooks/useMicPressure';
+import {
+  SoundMapResult, computeSoundMapResult, isSoundMapComplete,
+} from '../utils/soundMapResult';
+import { saveSoundMapResult } from '../hooks/useSoundMaps';
 import RecordingPressurePanel from './RecordingPressurePanel';
+import SoundMapResultView from './SoundMapResultView';
 
 type Stage = 'intro' | 'card' | 'done';
 
@@ -127,7 +132,7 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
           )}
 
           {stage === 'done' && (
-            <DoneScreen cardCount={cards.length} onClose={onClose} />
+            <DoneScreen cards={cards} responses={responses} onClose={onClose} />
           )}
         </div>
       </main>
@@ -451,20 +456,87 @@ function SpeakInput({
             </button>
           ))}
         </div>
+
+        {/* 몸 감각은 원래 불확실하다 — 억지로 고르게 하지 않는다. */}
+        <button
+          onClick={() => onSelect(UNKNOWN_ASSESSMENT.value)}
+          className={[
+            'w-full mt-2 rounded-xl py-2.5 text-xs font-medium border-2 transition-all active:scale-[0.98]',
+            selected === UNKNOWN_ASSESSMENT.value
+              ? 'bg-gray-400 text-white border-gray-400'
+              : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300',
+          ].join(' ')}
+        >
+          {UNKNOWN_ASSESSMENT.label}
+        </button>
+        <p className="text-[11px] text-gray-400 text-center mt-2">
+          확실하지 않으면 눌러도 괜찮아요. 모르는 것도 기록이에요.
+        </p>
       </div>
     </div>
   );
 }
 
-function DoneScreen({ cardCount, onClose }: { cardCount: number; onClose: () => void }) {
+// 완료 화면 — 결과를 계산하고, 완주한 경우에만 저장한 뒤 지도를 보여준다.
+function DoneScreen({
+  cards, responses, onClose,
+}: {
+  cards: SoundCard[];
+  responses: Record<string, SoundResponse>;
+  onClose: () => void;
+}) {
+  const [result, setResult] = useState<SoundMapResult | null>(null);
+  const [unsaved, setUnsaved] = useState(false);
+  const ranRef = useRef(false);   // StrictMode 이중 실행으로 두 번 저장되지 않게
+
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+
+    const computed = computeSoundMapResult(cards, responses);
+    const stamp = () => ({ ...computed, id: 'unsaved', createdAt: new Date().toISOString() });
+
+    // 중간에 빠져나온 기록은 저장하지 않는다 (화면에서만 보여줌).
+    if (!isSoundMapComplete(cards, responses)) {
+      setResult(stamp());
+      setUnsaved(true);
+      return;
+    }
+
+    let alive = true;
+    saveSoundMapResult(computed)
+      .then(saved => { if (alive) setResult(saved); })
+      .catch(() => {
+        // 저장에 실패해도 방금 만든 지도는 반드시 보여준다.
+        if (!alive) return;
+        setResult(stamp());
+        setUnsaved(true);
+      });
+    return () => { alive = false; };
+  }, [cards, responses]);
+
+  if (!result) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-gray-400 text-sm">지도를 만드는 중...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4 text-center pt-6">
-      <p className="text-3xl">🗺️</p>
-      <h2 className="text-lg font-bold text-gray-800">소리 지도가 완성됐어요!</h2>
-      <p className="text-sm text-gray-500 leading-relaxed">
-        {cardCount}개의 소리를 3단계로 기록했어요.<br />
-        압력 단계별 분석 결과는 곧 추가됩니다.
-      </p>
+    <div className="space-y-4">
+      <div className="text-center pt-2 pb-1">
+        <p className="text-3xl mb-2">🗺️</p>
+        <h2 className="text-lg font-bold text-gray-800">소리 지도가 완성됐어요!</h2>
+        {unsaved && (
+          <p className="text-xs text-amber-600 mt-2">
+            이번 기록은 저장되지 않았어요. 화면을 닫으면 사라집니다.
+          </p>
+        )}
+      </div>
+
+      <SoundMapResultView result={result} />
+
       <button
         onClick={onClose}
         className="w-full rounded-xl py-3.5 text-sm font-semibold bg-teal-500 text-white hover:bg-teal-600 transition-colors"

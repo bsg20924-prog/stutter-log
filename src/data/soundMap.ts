@@ -9,14 +9,22 @@ export interface SoundCard {
   kind: SoundKind;
 }
 
-// 말하기 단계의 자가 평가
-export type Assessment = 'smooth' | 'partial' | 'blocked';
+// 말하기 단계의 자가 평가.
+// 'unknown'(모르겠음)은 회피용 건너뛰기가 아니라 "스스로도 판단이 안 됐다"는 실제 데이터다.
+// 몸 감각은 원래 불확실하므로, 억지로 고르게 해서 지도를 오염시키는 것보다 공백으로 남기는 편이 정확하다.
+export type Assessment = 'smooth' | 'partial' | 'blocked' | 'unknown';
 
 export const ASSESSMENTS: { value: Assessment; label: string; cls: string; activeCls: string }[] = [
   { value: 'smooth',  label: '술술 나옴', cls: 'text-teal-600',   activeCls: 'bg-teal-500 text-white border-teal-500' },
   { value: 'partial', label: '걸림',      cls: 'text-amber-600',  activeCls: 'bg-amber-400 text-white border-amber-400' },
   { value: 'blocked', label: '막힘',      cls: 'text-red-600',    activeCls: 'bg-red-500 text-white border-red-500' },
 ];
+
+// 위 3개 아래에 따로 두는 4번째 선택지 (3열 그리드는 그대로 유지)
+export const UNKNOWN_ASSESSMENT: { value: Assessment; label: string } = {
+  value: 'unknown',
+  label: '모르겠음',
+};
 
 // 4단계 (Step 0~3)
 export type SoundStepId = 'fear' | 'whisper' | 'normal' | 'recording';

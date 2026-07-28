@@ -20,6 +20,11 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
+    // 소리 지도 결과(압력 임계점 분석). 녹음 오디오는 저장하지 않고 평가값만 남긴다.
+    match /soundMaps/{docId} {
+      allow read, write: if isOwner();
+    }
+
     // 그 외 경로는 모두 차단
     match /{document=**} {
       allow read, write: if false;
