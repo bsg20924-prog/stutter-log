@@ -128,7 +128,7 @@ const LOCAL_KEY = 'stutter_log';
 const MIGRATED_KEY = 'stutter_log_migrated';
 
 // 개발 서버(npm run dev)는 로그인을 건너뛰므로 Firestore 규칙에 막힌다.
-// useDiagnostics / useSoundMaps 와 같은 방식으로 localStorage 에 저장한다.
+// useSoundMaps 와 같은 방식으로 localStorage 에 저장한다.
 // 저장소 키는 구형 마이그레이션 소스(LOCAL_KEY)와 반드시 분리한다 —
 // 같은 키를 쓰면 개발 중 만든 테스트 기록이 나중에 프로덕션 Firestore 로 업로드된다.
 const USE_LOCAL = import.meta.env.DEV;

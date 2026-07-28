@@ -5,10 +5,9 @@
 // 속삭임·목소리는 멀쩡한데 녹음에서만 걸리면 압박(불안)에 반응하는 것이다.
 // 이 둘은 대응 방법이 정반대라 반드시 구분해야 한다.
 
-import { ArticulationZone, phonemeToZones } from './phonetics';
-import { extractPhoneme } from './phoneme';
+import { ArticulationZone } from './phonetics';
 import {
-  SoundCard, SoundKind, SoundResponse, RecordingMode,
+  SoundCard, SoundKind, SoundResponse, RecordingMode, BlockageType,
 } from '../data/soundMap';
 
 export type PressureThreshold = 'none' | 'recording' | 'normal' | 'whisper' | 'unknown';
@@ -95,6 +94,8 @@ export interface SoundMapCardResult {
   cardId: string;
   text: string;
   kind: SoundKind;
+  groupId: string;
+  blockage?: BlockageType;   // 사용자 추가 단어는 유형을 알 수 없다
   fear?: number;
   threshold: PressureThreshold;
   fearGap: FearGap;
@@ -133,14 +134,10 @@ function emptyZoneBlockage(): Record<ArticulationZone, number> {
   return { 입술: 0, 혀끝: 0, 입천장: 0, 연구개: 0, 성대: 0 };
 }
 
-// 조음 위치(입술·혀끝·입천장·연구개·성대)는 본래 자음의 개념이다.
-// 모음의 전설/후설은 같은 축이 아니라서 함께 세면 통계가 왜곡된다 — 모음 카드는 아예 제외한다.
-// 자음·나의 단어도 초성이 'ㅇ'(음가 없는 초성)이면 조음 위치로 볼 수 없어 제외한다.
-function consonantPhoneme(card: SoundCard): string {
-  if (card.kind === 'vowel') return '';
-  const p = extractPhoneme(card.text);
-  return p === 'ㅇ' ? '' : p;
-}
+// 조음 위치는 데이터셋에 음성학적으로 지정된 zone 을 그대로 쓴다.
+// 초성에서 기계적으로 추출하면 모음의 전설/후설을 자음 위치로 잘못 세거나
+// 음가 없는 초성 'ㅇ'(아메리카노 등)을 연구개로 세는 오류가 생긴다.
+// 사용자가 추가한 단어는 zone 을 알 수 없어 집계에서 빠진다.
 
 // 모든 카드에 예상 긴장도 + 3단계 응답이 있어야 완료로 본다('모르겠음'도 응답으로 인정).
 export function isSoundMapComplete(
@@ -184,9 +181,8 @@ export function computeSoundMapResult(
 
     // 어디선가 걸린 소리만 조음 위치 집계에 반영 (안전지대·판단불가는 제외)
     if (threshold === 'whisper' || threshold === 'normal' || threshold === 'recording') {
-      const p = consonantPhoneme(card);
-      if (p) {
-        for (const zone of phonemeToZones(p)) zoneBlockage[zone] += 1;
+      if (card.zone) {
+        zoneBlockage[card.zone] += 1;
         zoneSamples += 1;
       }
     }
@@ -198,6 +194,8 @@ export function computeSoundMapResult(
       cardId: card.id,
       text: card.text,
       kind: card.kind,
+      groupId: card.groupId,
+      blockage: card.blockage,
       fear: r?.fear,
       threshold,
       fearGap,

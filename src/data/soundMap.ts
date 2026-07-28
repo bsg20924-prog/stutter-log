@@ -1,13 +1,111 @@
-// 소리 지도 만들기(Sound Map Test) — 3단계 압박 사다리 데이터/타입.
-// Part 2: 3단계에서 실제 마이크 녹음으로 압박을 건다. 분석/저장 로직은 이후 파트에서 추가.
+// 소리 지도(Sound Map Test) — 3단계 압박 사다리 데이터/타입.
+//
+// 구 자가 진단 테스트의 28개 음운 데이터셋(단모음·이중모음·평음/된소리/거센소리·
+// 비음/유음·마찰/파찰음 + 영어 대조군)을 이 카드 세트로 흡수했다.
+// 각 카드는 "언제 걸리는가"(압력 임계점)를 재기 위한 소리이자,
+// "왜 걸리는가"(막힘 유형)를 분류하기 위한 태그를 함께 들고 다닌다.
+
+import { ArticulationZone } from '../utils/phonetics';
+
+// 막힘 유형 — 구 진단 모듈의 mechanism 을 3종으로 정리한 것.
+//   airway       (구 airflow-glottal)      공기 흐름 / 성문 잠김
+//   laryngeal    (구 laryngeal-tension)    후두 긴장
+//   articulation (구 articulatory-forcing) 조음 기관 힘주기
+export type BlockageType = 'airway' | 'laryngeal' | 'articulation';
 
 export type SoundKind = 'vowel' | 'consonant' | 'custom';
 
 export interface SoundCard {
   id: string;
-  text: string;   // 화면에 크게 표시할 소리/단어
+  text: string;               // 화면에 크게 표시할 소리/단어
   kind: SoundKind;
+  groupId: string;            // 표시용 음운 그룹
+  blockage?: BlockageType;    // 막힘 유형 (사용자 추가 단어는 알 수 없음)
+  zone?: ArticulationZone;    // 조음 위치 (사용자 추가 단어는 알 수 없음)
 }
+
+export interface SoundGroup {
+  id: string;
+  label: string;
+  sublabel: string;
+}
+
+// 지도에서의 표시 순서 = 이 배열 순서
+export const SOUND_GROUPS: SoundGroup[] = [
+  { id: 'monophthong',        label: '단모음',        sublabel: '모음 · 공기 흐름 시작' },
+  { id: 'diphthong',          label: '이중모음',      sublabel: '활음 · 성대 진입' },
+  { id: 'plain-plosive',      label: '평음',          sublabel: '예사소리 파열음 (ㅂ/ㄷ/ㄱ)' },
+  { id: 'tense-plosive',      label: '된소리',        sublabel: '경음 파열음 (ㅃ/ㄸ/ㄲ)' },
+  { id: 'aspirated-plosive',  label: '거센소리',      sublabel: '격음 파열음 (ㅍ/ㅌ/ㅋ)' },
+  { id: 'nasal-liquid',       label: '비음·유음',     sublabel: '울림소리 (ㄴ/ㄹ/ㅁ)' },
+  { id: 'fricative-affricate',label: '마찰·파찰음',   sublabel: '마찰·파찰음 (ㅅ/ㅈ/ㅊ)' },
+  { id: 'custom',             label: '나의 단어',     sublabel: '내가 추가한 무서운 단어' },
+];
+
+export function getSoundGroup(id: string): SoundGroup | undefined {
+  return SOUND_GROUPS.find(g => g.id === id);
+}
+
+// [단어, 막힘 유형, 조음 위치]
+type Seed = [text: string, blockage: BlockageType, zone: ArticulationZone];
+
+// 한국어 16 + 영어 12 = 28개. 구 진단 모듈의 통합 세트를 그대로 옮겼다.
+// 한국어 파열음은 조음 방법(평음/된소리/거센소리)으로 묶이지만 실제 막힘은
+// 첫소리의 조음 위치에서 일어나므로, ㄱ/ㅋ(연구개음)은 그룹과 무관하게 후두 긴장으로 분류한다.
+const SEED: Record<string, Seed[]> = {
+  'monophthong': [
+    ['아침', 'airway', '성대'], ['오리', 'airway', '성대'], ['Apple', 'airway', '성대'],
+  ],
+  'diphthong': [
+    ['야구', 'airway', '성대'], ['의사', 'airway', '성대'], ['Ice', 'airway', '성대'],
+  ],
+  'plain-plosive': [
+    ['바다', 'articulation', '입술'], ['다리', 'articulation', '혀끝'],
+    ['가방', 'laryngeal', '연구개'], ['Door', 'articulation', '혀끝'],
+  ],
+  'tense-plosive': [
+    ['뿌리', 'articulation', '입술'], ['코끼리', 'laryngeal', '연구개'],
+  ],
+  'aspirated-plosive': [
+    ['파도', 'articulation', '입술'], ['태양', 'articulation', '혀끝'],
+    ['기차', 'laryngeal', '연구개'], ['Paper', 'articulation', '입술'],
+    ['Table', 'articulation', '혀끝'], ['Coffee', 'laryngeal', '연구개'],
+    ['King', 'laryngeal', '연구개'], ['Play', 'articulation', '입술'],
+    ['Clock', 'laryngeal', '연구개'],
+  ],
+  'nasal-liquid': [
+    ['나무', 'articulation', '혀끝'], ['모자', 'articulation', '입술'],
+  ],
+  'fricative-affricate': [
+    ['사과', 'airway', '혀끝'], ['치마', 'airway', '입천장'],
+    ['Sun', 'airway', '혀끝'], ['Fish', 'airway', '입술'],
+    ['Street', 'articulation', '혀끝'],
+  ],
+};
+
+// 모음 그룹은 kind='vowel', 나머지는 'consonant'
+const VOWEL_GROUPS = new Set(['monophthong', 'diphthong']);
+
+export function buildDefaultCards(): SoundCard[] {
+  const cards: SoundCard[] = [];
+  for (const group of SOUND_GROUPS) {
+    const seed = SEED[group.id];
+    if (!seed) continue;
+    seed.forEach(([text, blockage, zone], i) => {
+      cards.push({
+        id: `${group.id}-${i + 1}`,
+        text,
+        kind: VOWEL_GROUPS.has(group.id) ? 'vowel' : 'consonant',
+        groupId: group.id,
+        blockage,
+        zone,
+      });
+    });
+  }
+  return cards;
+}
+
+export const DEFAULT_CARD_COUNT = Object.values(SEED).reduce((n, s) => n + s.length, 0);
 
 // 말하기 단계의 자가 평가.
 // 'unknown'(모르겠음)은 회피용 건너뛰기가 아니라 "스스로도 판단이 안 됐다"는 실제 데이터다.
@@ -57,24 +155,11 @@ export interface SoundResponse {
   recordingMode?: RecordingMode;
 }
 
-// ── 기본 소리 세트 ─────────────────────────────────────────
-const VOWELS = ['아', '어', '오', '우', '으', '이'];
-
-// 평음 / 된소리 / 거센소리 대비 (핵심 자음 조합)
-const CONSONANTS = ['가', '까', '카', '바', '빠', '파', '사', '자'];
-
-export function buildDefaultCards(): SoundCard[] {
-  return [
-    ...VOWELS.map((t, i): SoundCard => ({ id: `vowel-${i + 1}`, text: t, kind: 'vowel' })),
-    ...CONSONANTS.map((t, i): SoundCard => ({ id: `consonant-${i + 1}`, text: t, kind: 'consonant' })),
-  ];
-}
-
 // 사용자가 추가하는 "무서운 단어" 추천 칩
 export const SUGGESTED_CUSTOM_WORDS = ['아메리카노', '전화', '제 이름'];
 
 export function makeCustomCard(text: string, seq: number): SoundCard {
-  return { id: `custom-${seq}-${text}`, text, kind: 'custom' };
+  return { id: `custom-${seq}-${text}`, text, kind: 'custom', groupId: 'custom' };
 }
 
 export const KIND_LABEL: Record<SoundKind, string> = {

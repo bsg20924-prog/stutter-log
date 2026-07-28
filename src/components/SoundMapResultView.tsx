@@ -6,35 +6,40 @@
 
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { MicOff, HelpCircle, ChevronDown, Check, Timer, Target, Sparkles } from 'lucide-react';
+import { MicOff, HelpCircle, ChevronDown, Check, Timer, Target, Sparkles, Info } from 'lucide-react';
 import { ko } from 'date-fns/locale';
 import {
-  SoundMapResult, SoundMapCardResult, PressureThreshold,
+  SoundMapResult, SoundMapCardResult,
   THRESHOLD_META, THRESHOLD_ORDER, summarizeSoundMap,
 } from '../utils/soundMapResult';
-import { SoundKind, KIND_LABEL } from '../data/soundMap';
+import { SOUND_GROUPS } from '../data/soundMap';
+import {
+  Prescription, BLOCKAGE_META, buildPrescriptions,
+} from '../utils/soundMapPrescription';
 import { ZONES } from '../utils/phonetics';
 import { extractPhoneme } from '../utils/phoneme';
-import { getStrategy, Strategy } from '../data/strategies';
+import { getStrategy, Strategy, STRATEGY_CATEGORIES } from '../data/strategies';
 import { useLogStore } from '../hooks/useLogStore';
 import QuickPracticeModal from './QuickPracticeModal';
-
-const KIND_ORDER: SoundKind[] = ['vowel', 'consonant', 'custom'];
+import StrategyDetailModal from './StrategyDetailModal';
+import ArticulationMap from './ArticulationMap';
 
 // 기록 note 접두사 — 같은 소리 지도에서 두 번 등록되는 것을 막는 데 쓴다.
-const NOTE_CHALLENGE = '소리 지도 · 녹음 압박에서 걸림';
+const NOTE_CHALLENGE = '소리 지도 · 압력 사다리에서 걸림';
 const NOTE_EVIDENCE = '소리 지도 · 예상보다 잘 나온 증거';
-
-// 속삭임에서도 걸리는 소리는 힘이 과하게 들어간 경우가 많아 '가벼운 접촉'을 기본 연습으로 건다.
-const HARD_SOUND_STRATEGY = 'light-contact';
 
 export default function SoundMapResultView({ result }: { result: SoundMapResult }) {
   const [practice, setPractice] = useState<Strategy | null>(null);
+  const [detail, setDetail] = useState<Strategy | null>(null);
   const t = result.thresholdCounts;
   const broken = t.recording + t.normal + t.whisper;
   const present = THRESHOLD_ORDER.filter(k => t[k] > 0);
 
   const overpredictedCards = result.cards.filter(c => c.fearGap === 'over');
+  // 저장된 카드에서 매번 파생 — 예전 지도도 처방을 받을 수 있다.
+  const prescriptions = buildPrescriptions(result.cards);
+  // 연습 모달에 넘길 단어: 처방 대상 단어가 없으면 걸린 소리 전체
+  const practiceWords = prescriptions.flatMap(p => p.words);
 
   return (
     <div className="space-y-4">
@@ -104,12 +109,17 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
 
         <div className="space-y-3">
-          {KIND_ORDER.map(kind => {
-            const cards = result.cards.filter(c => c.kind === kind);
+          {SOUND_GROUPS.map(group => {
+            // 예전에 저장된 지도는 groupId 가 없을 수 있어 kind 로 보정한다
+            const cards = result.cards.filter(c =>
+              (c.groupId ?? (c.kind === 'custom' ? 'custom' : '')) === group.id);
             if (cards.length === 0) return null;
             return (
-              <div key={kind}>
-                <p className="text-[11px] font-medium text-gray-400 mb-1.5">{KIND_LABEL[kind]}</p>
+              <div key={group.id}>
+                <p className="text-[11px] font-medium text-gray-400 mb-1.5">
+                  {group.label}
+                  <span className="text-gray-300"> · {group.sublabel}</span>
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {cards.map(c => <SoundChip key={c.cardId} card={c} />)}
                 </div>
@@ -152,30 +162,29 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
       </div>
 
+      {/* ── 맞춤 처방: 언제(임계점) × 왜(막힘 유형) → 무엇(전략) ── */}
+      {prescriptions.length > 0 && (
+        <div className="space-y-3">
+          <div className="px-1">
+            <h3 className="text-sm font-semibold text-gray-700">🎯 맞춤 처방</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              어느 압력에서 걸렸는지와 왜 걸렸는지를 함께 보고 고른 전략이에요.
+            </p>
+          </div>
+          {prescriptions.map(p => (
+            <PrescriptionCard
+              key={`${p.threshold}:${p.blockage}`}
+              prescription={p}
+              onDetail={setDetail}
+              onPractice={setPractice}
+            />
+          ))}
+        </div>
+      )}
+
       {/* ── 조음 위치 (접힘 · 참고용) ── */}
       {/* 예전에 저장된 결과에는 zoneSamples 가 없을 수 있어 방어적으로 처리 */}
       {(result.zoneSamples ?? 0) > 0 && <ZoneDetails result={result} />}
-
-      {/* ── 처방 카드 ── */}
-      {result.pressureSensitiveWords.length > 0 && (
-        <InsightCard
-          threshold="recording"
-          title="압박에만 반응한 소리"
-          words={result.pressureSensitiveWords}
-          action={<RegisterChallengeAction words={result.pressureSensitiveWords} />}
-        />
-      )}
-
-      {result.hardSoundWords.length > 0 && (
-        <InsightCard
-          threshold="whisper"
-          title="속삭임에서도 걸린 소리"
-          words={result.hardSoundWords}
-          action={
-            <PracticeAction onStart={() => setPractice(getStrategy(HARD_SOUND_STRATEGY) ?? null)} />
-          }
-        />
-      )}
 
       {overpredictedCards.length > 0 && (
         <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
@@ -205,10 +214,11 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
       )}
 
+      {detail && <StrategyDetailModal strategy={detail} onClose={() => setDetail(null)} />}
       {practice && (
         <QuickPracticeModal
           strategy={practice}
-          blockedWords={result.hardSoundWords}
+          blockedWords={practiceWords.length > 0 ? practiceWords : result.hardSoundWords}
           onClose={() => setPractice(null)}
         />
       )}
@@ -216,9 +226,76 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
   );
 }
 
+// ── 처방 카드: 언제 × 왜 → 무엇 ──────────────────────────────
+function PrescriptionCard({
+  prescription, onDetail, onPractice,
+}: {
+  prescription: Prescription;
+  onDetail: (s: Strategy) => void;
+  onPractice: (s: Strategy) => void;
+}) {
+  const meta = THRESHOLD_META[prescription.threshold];
+  const blockage = BLOCKAGE_META[prescription.blockage];
+  const strategies = prescription.strategies
+    .map(getStrategy)
+    .filter((s): s is Strategy => Boolean(s));
+
+  return (
+    <div className="rounded-2xl border bg-white overflow-hidden" style={{ borderColor: meta.color }}>
+      {/* 언제 */}
+      <div className="px-4 pt-4 pb-3" style={{ backgroundColor: meta.tint }}>
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: meta.color }} />
+          <span className="text-sm font-semibold text-gray-800">{prescription.headline}</span>
+        </div>
+        {/* 왜 */}
+        <p className="text-xs font-medium text-gray-600 mb-1">왜 — {blockage.label}</p>
+        <p className="text-xs text-gray-600 leading-relaxed mb-3">{prescription.reason}</p>
+        <WordChips words={prescription.words} color={meta.color} />
+      </div>
+
+      {/* 무엇 */}
+      <div className="px-4 py-3 space-y-2">
+        <p className="text-[11px] font-semibold text-gray-400">추천 전략</p>
+        {strategies.map(s => {
+          const category = STRATEGY_CATEGORIES.find(c => c.id === s.category);
+          return (
+            <button
+              key={s.id}
+              onClick={() => onDetail(s)}
+              className="w-full text-left rounded-xl bg-gray-50 px-3 py-2.5 hover:bg-teal-50/60 transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="text-sm">{category?.emoji}</span>
+                <span className="text-sm font-semibold text-gray-800">{s.name}</span>
+                <Info size={14} className="ml-auto shrink-0 text-gray-300" />
+              </span>
+              <span className="block text-xs text-gray-500 leading-relaxed mt-0.5">{s.actionGuide}</span>
+            </button>
+          );
+        })}
+
+        <div className="flex gap-2 pt-1">
+          <RegisterChallengeAction words={prescription.words} compact />
+          {strategies[0] && (
+            <button
+              onClick={() => onPractice(strategies[0])}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-teal-50 py-2.5 text-xs font-semibold text-teal-700 border border-teal-200 hover:bg-teal-100 transition-colors"
+            >
+              <Timer size={14} />
+              10초 연습하기
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 조음 위치: 기본은 접어 두고, 열면 단순 목록으로만 보여준다 ──────────
 function ZoneDetails({ result }: { result: SoundMapResult }) {
   const [open, setOpen] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   const rows = ZONES
     .map(z => ({ zone: z, count: result.zoneBlockage[z] }))
     .filter(r => r.count > 0)
@@ -241,7 +318,7 @@ function ZoneDetails({ result }: { result: SoundMapResult }) {
       {open && (
         <div className="px-4 pb-4 border-t border-gray-100 pt-3">
           {rows.length === 0 ? (
-            <p className="text-xs text-gray-400">자음에서 걸린 소리가 없어 표시할 정보가 없어요.</p>
+            <p className="text-xs text-gray-400">걸린 소리가 없어 표시할 정보가 없어요.</p>
           ) : (
             <ul className="divide-y divide-gray-100">
               {rows.map(r => (
@@ -254,8 +331,30 @@ function ZoneDetails({ result }: { result: SoundMapResult }) {
           )}
           <p className="text-[11px] text-gray-400 mt-3 leading-relaxed">
             표본 수가 적어 참고용 정보입니다.
-            {' '}자음 {result.zoneSamples}개 기준이며, 모음은 조음 위치 집계에서 제외했어요.
+            {' '}소리 {result.zoneSamples}개 기준이며, 내가 추가한 단어는 조음 위치를 알 수 없어 제외했어요.
           </p>
+
+          {/* 해부도는 2차 정보 — 목록 아래에 한 번 더 접어 둔다. 강한 빨강 히트맵은 쓰지 않는다. */}
+          {rows.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <button
+                onClick={() => setShowMap(m => !m)}
+                aria-expanded={showMap}
+                className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                발음 기관 그림으로 보기
+                <ChevronDown
+                  size={14}
+                  className={`shrink-0 text-gray-400 transition-transform ${showMap ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {showMap && (
+                <div className="mt-2">
+                  <ArticulationMap frequency={result.zoneBlockage} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -292,52 +391,28 @@ function WordChips({ words, color }: { words: string[]; color: string }) {
   );
 }
 
-function InsightCard({
-  threshold, title, words, action,
-}: {
-  threshold: PressureThreshold;
-  title: string;
-  words: string[];
-  action?: React.ReactNode;
-}) {
-  const meta = THRESHOLD_META[threshold];
-  return (
-    <div
-      className="rounded-2xl p-4 border"
-      style={{ backgroundColor: meta.tint, borderColor: meta.color }}
-    >
-      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 mb-1">
-        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: meta.color }} />
-        {title}
-      </h3>
-      <p className="text-xs text-gray-600 leading-relaxed mb-3">{meta.desc}</p>
-      <WordChips words={words} color={meta.color} />
-      {action && <div className="mt-3">{action}</div>}
-    </div>
-  );
-}
-
 // ── 처방 버튼 ────────────────────────────────────────────────
 type ActionState = 'idle' | 'busy' | 'done' | 'error';
 
 function ActionButton({
-  state, idleLabel, doneLabel, icon, onClick,
+  state, idleLabel, doneLabel, icon, onClick, compact,
 }: {
   state: ActionState;
   idleLabel: string;
   doneLabel: string;
   icon: React.ReactNode;
   onClick: () => void;
+  compact?: boolean;
 }) {
   if (state === 'done') {
     return (
-      <p className="flex items-center justify-center gap-1.5 rounded-xl bg-white/70 py-2.5 text-xs font-semibold text-gray-500">
+      <p className={`flex items-center justify-center gap-1.5 rounded-xl bg-gray-50 py-2.5 text-xs font-semibold text-gray-500 ${compact ? 'flex-1' : 'w-full'}`}>
         <Check size={14} /> {doneLabel}
       </p>
     );
   }
   return (
-    <div>
+    <div className={compact ? 'flex-1' : ''}>
       <button
         onClick={onClick}
         disabled={state === 'busy'}
@@ -355,8 +430,8 @@ function ActionButton({
   );
 }
 
-// 녹음 압박에서만 걸린 소리 → 도전 단어로 등록
-function RegisterChallengeAction({ words }: { words: string[] }) {
+// 걸린 소리 → 도전 단어로 등록
+function RegisterChallengeAction({ words, compact }: { words: string[]; compact?: boolean }) {
   const { entries, addEntry } = useLogStore();
   const [state, setState] = useState<ActionState>('idle');
 
@@ -389,23 +464,11 @@ function RegisterChallengeAction({ words }: { words: string[] }) {
     <ActionButton
       state={already ? 'done' : state}
       idleLabel="도전 단어로 등록"
-      doneLabel="도전 단어로 등록됨"
+      doneLabel="등록됨"
       icon={<Target size={14} />}
       onClick={register}
+      compact={compact}
     />
-  );
-}
-
-// 속삭임에서도 걸린 소리 → 10초 연습
-function PracticeAction({ onStart }: { onStart: () => void }) {
-  return (
-    <button
-      onClick={onStart}
-      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-white py-2.5 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors"
-    >
-      <Timer size={14} />
-      10초 연습하기
-    </button>
   );
 }
 

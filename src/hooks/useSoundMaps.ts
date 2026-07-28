@@ -1,4 +1,4 @@
-// 소리 지도 결과 저장/구독. useDiagnostics 와 같은 구조를 따른다.
+// 소리 지도 결과 저장/구독.
 
 import { useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';

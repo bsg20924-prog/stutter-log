@@ -1,6 +1,6 @@
 import { StrategyId } from '../types';
-import { mechanismOfStrategy } from './diagnostic';
-import { unifiedDiagnosticWords } from '../data/diagnosticWords';
+import { blockageOfStrategy } from './soundMapPrescription';
+import { buildDefaultCards } from '../data/soundMap';
 
 // 전략별 10초 미니 연습 단계. word 를 넣어 구체적인 안내 문장을 만든다.
 const PRACTICE_STEPS: Record<StrategyId, (word: string) => string[]> = {
@@ -76,27 +76,27 @@ const PRACTICE_STEPS: Record<StrategyId, (word: string) => string[]> = {
   ],
 };
 
-// 전략과 잘 맞는 연습 단어 선택: 같은 메커니즘의 막힌 단어 우선 → 아무 막힌 단어 → 기본 예시
+// 전략과 잘 맞는 연습 단어 선택: 같은 막힘 유형의 걸린 단어 우선 → 아무 걸린 단어 → 기본 예시
 const DEFAULT_WORDS: Record<string, string> = {
-  'airflow-glottal': '아침',
-  'laryngeal-tension': '가방',
-  'articulatory-forcing': '바다',
-  'core-breathing': '아침',
+  airway: '아침',
+  laryngeal: '가방',
+  articulation: '바다',
 };
 
 export function pickPracticeWord(strategyId: StrategyId, blockedWords: string[]): string {
-  const mech = mechanismOfStrategy(strategyId);
+  const type = blockageOfStrategy(strategyId);
   if (blockedWords.length > 0) {
-    if (mech) {
+    if (type) {
+      const cards = buildDefaultCards();
       const matched = blockedWords.find(w => {
-        const dw = unifiedDiagnosticWords.find(x => x.word === w);
-        return dw && dw.mechanism === mech;
+        const card = cards.find(c => c.text === w);
+        return card && card.blockage === type;
       });
       if (matched) return matched;
     }
     return blockedWords[0];
   }
-  return (mech && DEFAULT_WORDS[mech]) || '아침';
+  return (type && DEFAULT_WORDS[type]) || '아침';
 }
 
 export function getPracticeSteps(strategyId: StrategyId, word: string): string[] {
