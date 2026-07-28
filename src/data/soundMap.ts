@@ -1,5 +1,5 @@
 // 소리 지도 만들기(Sound Map Test) — 3단계 압박 사다리 데이터/타입.
-// Part 1: UI 스켈레톤 & 상태 흐름용. 녹음/분석/저장 로직은 이후 파트에서 추가.
+// Part 2: 3단계에서 실제 마이크 녹음으로 압박을 건다. 분석/저장 로직은 이후 파트에서 추가.
 
 export type SoundKind = 'vowel' | 'consonant' | 'custom';
 
@@ -33,8 +33,12 @@ export const SOUND_STEPS: SoundStep[] = [
   { id: 'fear',      index: 0, short: '예상 긴장', title: '말하기 전, 예상 긴장도', prompt: '이 소리, 얼마나 어렵게 느껴지나요?' },
   { id: 'whisper',   index: 1, short: '속삭임',    title: '1단계 · 속삭임',        prompt: '속삭이듯 아주 작게 소리 내보세요.' },
   { id: 'normal',    index: 2, short: '목소리',    title: '2단계 · 목소리',        prompt: '이제 평소 목소리로 말해보세요.' },
-  { id: 'recording', index: 3, short: '녹음',      title: '3단계 · 녹음 압박',     prompt: '녹음을 켠 상태로 말한다고 상상하며 말해보세요.' },
+  { id: 'recording', index: 3, short: '녹음',      title: '3단계 · 녹음 압박',     prompt: '녹음이 도는 상태에서 그대로 말해보세요.' },
 ];
+
+// 3단계에서 실제 마이크 압박이 걸렸는지 — 오디오 자체는 절대 저장하지 않고,
+// 나중에 "진짜 녹음 압박"과 "수동(마이크 없이) 압박"을 구분해 분석하기 위한 표시만 남긴다.
+export type RecordingMode = 'mic' | 'manual';
 
 // 카드 하나에 대한 응답 (단계별)
 export interface SoundResponse {
@@ -42,6 +46,7 @@ export interface SoundResponse {
   whisper?: Assessment;
   normal?: Assessment;
   recording?: Assessment;
+  recordingMode?: RecordingMode;
 }
 
 // ── 기본 소리 세트 ─────────────────────────────────────────

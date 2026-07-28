@@ -1,10 +1,12 @@
-import { useState, KeyboardEvent } from 'react';
-import { X, ChevronLeft, Mic, Plus, Map as MapIcon } from 'lucide-react';
+import { useState, useEffect, KeyboardEvent } from 'react';
+import { X, ChevronLeft, Plus, Map as MapIcon } from 'lucide-react';
 import {
-  SoundCard, SoundResponse, Assessment, SoundStepId,
+  SoundCard, SoundResponse, Assessment, SoundStepId, RecordingMode,
   SOUND_STEPS, ASSESSMENTS, KIND_LABEL,
   buildDefaultCards, makeCustomCard, SUGGESTED_CUSTOM_WORDS,
 } from '../data/soundMap';
+import { useMicPressure, MicPressure } from '../hooks/useMicPressure';
+import RecordingPressurePanel from './RecordingPressurePanel';
 
 type Stage = 'intro' | 'card' | 'done';
 
@@ -15,11 +17,28 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(0); // 0~3
   const [responses, setResponses] = useState<Record<string, SoundResponse>>({});
   const [confirmExit, setConfirmExit] = useState(false);
+  const [countdownOn, setCountdownOn] = useState(true);
+
+  const mic = useMicPressure(countdownOn);
+  const { start: micStart, stop: micStop, grantedOnce, didRecordRef } = mic;
 
   const card = cards[cardIndex];
+  const onRecordingStep = stage === 'card' && SOUND_STEPS[step]?.id === 'recording';
 
-  function start(customWords: string[]) {
+  // 3단계에 들어오면 녹음을 켜고, 벗어나면(카드 이동·이전·종료 확인) 즉시 마이크를 정리한다.
+  useEffect(() => {
+    if (!onRecordingStep || confirmExit) {
+      micStop();
+      return;
+    }
+    // 첫 카드에서는 사용자가 '녹음 시작하기'를 눌러야 권한 창이 제스처 안에서 뜬다.
+    // 한 번 허용된 뒤로는 카드마다 자동으로 시작한다.
+    if (grantedOnce) micStart();
+  }, [onRecordingStep, confirmExit, cardIndex, grantedOnce, micStart, micStop]);
+
+  function start(customWords: string[], countdown: boolean) {
     const custom = customWords.map((w, i) => makeCustomCard(w, i + 1));
+    setCountdownOn(countdown);
     setCards([...buildDefaultCards(), ...custom]);
     setCardIndex(0);
     setStep(0);
@@ -54,7 +73,17 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   }
 
   function setAssessment(stepId: SoundStepId, value: Assessment) {
-    setResponses(prev => ({ ...prev, [card.id]: { ...prev[card.id], [stepId]: value } }));
+    // 실제 녹음이 돌던 중의 응답인지 표시만 남긴다 (오디오는 저장하지 않음).
+    // 업데이터 안에서 ref 를 읽으면 실행 시점이 밀릴 수 있어 지금 값을 캡처해 둔다.
+    const mode: RecordingMode = didRecordRef.current ? 'mic' : 'manual';
+    setResponses(prev => ({
+      ...prev,
+      [card.id]: {
+        ...prev[card.id],
+        [stepId]: value,
+        ...(stepId === 'recording' ? { recordingMode: mode } : {}),
+      },
+    }));
     advance();
   }
 
@@ -90,6 +119,7 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
               total={cards.length}
               step={step}
               response={responses[card.id] ?? {}}
+              mic={mic}
               onFear={setFear}
               onAssess={setAssessment}
               onBack={back}
@@ -124,9 +154,10 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
 }
 
 // ── 인트로: 소리 세트 안내 + 무서운 단어 추가 ─────────────────
-function IntroScreen({ onStart }: { onStart: (customWords: string[]) => void }) {
+function IntroScreen({ onStart }: { onStart: (customWords: string[], countdown: boolean) => void }) {
   const [custom, setCustom] = useState<string[]>([]);
   const [input, setInput] = useState('');
+  const [countdown, setCountdown] = useState(true);
 
   function addWord(raw: string) {
     const w = raw.trim();
@@ -223,12 +254,44 @@ function IntroScreen({ onStart }: { onStart: (customWords: string[]) => void }) 
         )}
       </div>
 
+      {/* 녹음 압박 설정 */}
+      <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-700">녹음 전 3-2-1 카운트다운</p>
+            <p className="text-xs text-gray-400 mt-0.5">숨 고를 틈을 두고 녹음이 시작돼요.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={countdown}
+            aria-label="녹음 전 3-2-1 카운트다운"
+            onClick={() => setCountdown(v => !v)}
+            className={[
+              'relative shrink-0 w-11 h-6 rounded-full transition-colors',
+              countdown ? 'bg-teal-500' : 'bg-gray-200',
+            ].join(' ')}
+          >
+            <span
+              className={[
+                'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
+                countdown ? 'left-[22px]' : 'left-0.5',
+              ].join(' ')}
+            />
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-3 leading-relaxed border-t border-gray-100 pt-3">
+          3단계에서는 <b className="text-gray-500">실제로 마이크 녹음이 켜집니다.</b> 녹음된 소리는
+          저장되지 않고 바로 사라져요. 마이크를 허용하지 않아도 수동 압박 모드로 계속할 수 있어요.
+        </p>
+      </div>
+
       <p className="text-xs text-gray-400 text-center">
         기본 모음 6개 + 자음 8개{custom.length > 0 ? ` + 나의 단어 ${custom.length}개` : ''} 로 시작해요.
       </p>
 
       <button
-        onClick={() => onStart(custom)}
+        onClick={() => onStart(custom, countdown)}
         className="w-full rounded-xl py-3.5 text-sm font-semibold bg-teal-500 text-white hover:bg-teal-600 transition-colors"
       >
         시작하기
@@ -239,13 +302,14 @@ function IntroScreen({ onStart }: { onStart: (customWords: string[]) => void }) 
 
 // ── 카드 진행: 4단계 ──────────────────────────────────────
 function CardRunner({
-  card, cardIndex, total, step, response, onFear, onAssess, onBack,
+  card, cardIndex, total, step, response, mic, onFear, onAssess, onBack,
 }: {
   card: SoundCard;
   cardIndex: number;
   total: number;
   step: number;
   response: SoundResponse;
+  mic: MicPressure;
   onFear: (n: number) => void;
   onAssess: (stepId: SoundStepId, value: Assessment) => void;
   onBack: () => void;
@@ -304,6 +368,7 @@ function CardRunner({
         <SpeakInput
           prompt={stepDef.prompt}
           recording={stepDef.id === 'recording'}
+          mic={mic}
           selected={response[stepDef.id]}
           onSelect={v => onAssess(stepDef.id, v)}
         />
@@ -350,27 +415,24 @@ function FearInput({ prompt, value, onSelect }: { prompt: string; value?: number
 }
 
 function SpeakInput({
-  prompt, recording, selected, onSelect,
+  prompt, recording, mic, selected, onSelect,
 }: {
   prompt: string;
   recording: boolean;
+  mic: MicPressure;
   selected?: Assessment;
   onSelect: (v: Assessment) => void;
 }) {
   return (
     <div className="space-y-3">
-      {/* 녹음 압박 플레이스홀더 (실제 녹음 로직은 이후 파트) */}
       {recording && (
-        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-5 flex flex-col items-center">
-          <div className="relative flex items-center justify-center mb-2">
-            <span className="absolute w-12 h-12 rounded-full bg-red-200 animate-ping opacity-60" />
-            <span className="relative flex items-center justify-center w-11 h-11 rounded-full bg-red-500 text-white">
-              <Mic size={20} />
-            </span>
-          </div>
-          <p className="text-xs font-semibold text-red-600">녹음 압박 모드</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">준비 중 · 실제 녹음은 곧 추가됩니다</p>
-        </div>
+        <RecordingPressurePanel
+          state={mic.state}
+          elapsedSec={mic.elapsedSec}
+          countdownValue={mic.countdownValue}
+          analyserRef={mic.analyserRef}
+          onStart={mic.start}
+        />
       )}
 
       <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
