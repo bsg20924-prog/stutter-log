@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Stethoscope, RefreshCw, Map as MapIcon, ChevronRight } from 'lucide-react';
 import { useLatestDiagnostic } from '../hooks/useDiagnostics';
-import { useLatestSoundMap } from '../hooks/useSoundMaps';
+import { useLatestSoundMap, saveSoundMapResult, clearLocalSoundMaps } from '../hooks/useSoundMaps';
 import { SoundMapResult } from '../utils/soundMapResult';
 import DiagnosticResultView from './DiagnosticResultView';
 import SoundMapResultView from './SoundMapResultView';
@@ -75,21 +76,65 @@ function SoundMapSection({
   latest: SoundMapResult | null;
   onStart: () => void;
 }) {
-  if (!latest) return <SoundMapCard onStart={onStart} />;
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="text-sm font-semibold text-gray-600">최근 소리 지도</h2>
+      {import.meta.env.DEV && <DevSeedBar hasMap={!!latest} />}
+
+      {!latest ? (
+        <SoundMapCard onStart={onStart} />
+      ) : (
+        <>
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-sm font-semibold text-gray-600">최근 소리 지도</h2>
+            <button
+              onClick={onStart}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-teal-50 text-teal-600 border border-teal-200 hover:bg-teal-100 transition-colors"
+            >
+              <RefreshCw size={13} />
+              다시 만들기
+            </button>
+          </div>
+          <SoundMapResultView result={latest} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// 개발 전용: 15개 카드를 다 돌지 않고 결과 화면을 바로 확인한다.
+// 목업 데이터는 동적 import 라 프로덕션 번들에 들어가지 않고, 이 블록 자체도 DEV 에서만 렌더된다.
+function DevSeedBar({ hasMap }: { hasMap: boolean }) {
+  const [busy, setBusy] = useState(false);
+
+  async function seed() {
+    setBusy(true);
+    try {
+      const { buildMockSoundMap } = await import('../dev/soundMapMock');
+      await saveSoundMapResult(buildMockSoundMap());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-dashed border-purple-300 bg-purple-50/60 px-3 py-2">
+      <span className="text-[10px] font-bold text-purple-500 tracking-wider shrink-0">DEV</span>
+      <button
+        onClick={seed}
+        disabled={busy}
+        className="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-purple-500 text-white hover:bg-purple-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
+      >
+        {busy ? '만드는 중…' : '목업 지도 넣기'}
+      </button>
+      {hasMap && (
         <button
-          onClick={onStart}
-          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium bg-teal-50 text-teal-600 border border-teal-200 hover:bg-teal-100 transition-colors"
+          onClick={clearLocalSoundMaps}
+          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-purple-600 hover:bg-purple-100 transition-colors"
         >
-          <RefreshCw size={13} />
-          다시 만들기
+          지우기
         </button>
-      </div>
-      <SoundMapResultView result={latest} />
+      )}
+      <span className="ml-auto text-[10px] text-purple-400 truncate">결과 화면 미리보기</span>
     </div>
   );
 }

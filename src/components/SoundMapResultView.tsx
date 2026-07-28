@@ -1,25 +1,40 @@
-// 소리 지도 결과 화면 — 압력 임계점 지도 + 단계별 하강 + 조음 히트맵 + 예상 vs 실제.
+// 소리 지도 결과 화면 — 압력 임계점 지도 + 단계별 성공률 + (접힘) 조음 위치 + 처방 카드.
 //
 // 색은 심각도(안전 → 압박 반응 → 목소리부터 → 소리 자체)를 나타내는 순서형 팔레트이고,
 // 검증 스크립트를 통과한 hex 를 THRESHOLD_META 에서 그대로 쓴다.
 // 글자는 항상 먹색(gray-*)을 쓰고, 색은 칩의 배경/테두리와 범례만 담당한다.
 
+import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
+import { MicOff, HelpCircle, ChevronDown, Check, Timer, Target, Sparkles } from 'lucide-react';
 import { ko } from 'date-fns/locale';
-import { MicOff, HelpCircle } from 'lucide-react';
 import {
   SoundMapResult, SoundMapCardResult, PressureThreshold,
   THRESHOLD_META, THRESHOLD_ORDER, summarizeSoundMap,
 } from '../utils/soundMapResult';
 import { SoundKind, KIND_LABEL } from '../data/soundMap';
-import ArticulationMap from './ArticulationMap';
+import { ZONES } from '../utils/phonetics';
+import { extractPhoneme } from '../utils/phoneme';
+import { getStrategy, Strategy } from '../data/strategies';
+import { useLogStore } from '../hooks/useLogStore';
+import QuickPracticeModal from './QuickPracticeModal';
 
 const KIND_ORDER: SoundKind[] = ['vowel', 'consonant', 'custom'];
 
+// 기록 note 접두사 — 같은 소리 지도에서 두 번 등록되는 것을 막는 데 쓴다.
+const NOTE_CHALLENGE = '소리 지도 · 녹음 압박에서 걸림';
+const NOTE_EVIDENCE = '소리 지도 · 예상보다 잘 나온 증거';
+
+// 속삭임에서도 걸리는 소리는 힘이 과하게 들어간 경우가 많아 '가벼운 접촉'을 기본 연습으로 건다.
+const HARD_SOUND_STRATEGY = 'light-contact';
+
 export default function SoundMapResultView({ result }: { result: SoundMapResult }) {
+  const [practice, setPractice] = useState<Strategy | null>(null);
   const t = result.thresholdCounts;
   const broken = t.recording + t.normal + t.whisper;
   const present = THRESHOLD_ORDER.filter(k => t[k] > 0);
+
+  const overpredictedCards = result.cards.filter(c => c.fearGap === 'over');
 
   return (
     <div className="space-y-4">
@@ -51,7 +66,7 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         )}
 
         <p className="text-xs text-gray-400 mt-3">
-          소리 {result.totalCards}개 · 무너짐 {broken}개 · 안전 {t.none}개
+          소리 {result.totalCards}개 · 걸림 {broken}개 · 안전 {t.none}개
           {t.unknown > 0 && ` · 모르겠음 ${t.unknown}개`}
         </p>
 
@@ -70,7 +85,7 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
       {/* ── 지도 ── */}
       <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-1">나의 소리 지도</h3>
-        <p className="text-xs text-gray-400 mb-3">각 소리가 어느 압력에서 처음 무너졌는지예요.</p>
+        <p className="text-xs text-gray-400 mb-3">각 소리가 어느 압력에서 처음 걸렸는지예요.</p>
 
         {/* 범례 — 색만으로 구분되지 않도록 항상 표시 */}
         <div className="flex flex-wrap gap-x-3 gap-y-1.5 mb-4">
@@ -104,7 +119,7 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
       </div>
 
-      {/* ── 압력 단계별 하강 ── */}
+      {/* ── 압력 단계별 성공률 ── */}
       <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-1">압력 단계별 성공률</h3>
         <p className="text-xs text-gray-400 mb-3">
@@ -137,37 +152,41 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
       </div>
 
-      {/* ── 조음 기관 히트맵 (진단 결과와 동일한 지도 재사용) ── */}
-      {broken > 0 && (
-        <ArticulationMap frequency={result.zoneBlockage} heat />
-      )}
+      {/* ── 조음 위치 (접힘 · 참고용) ── */}
+      {/* 예전에 저장된 결과에는 zoneSamples 가 없을 수 있어 방어적으로 처리 */}
+      {(result.zoneSamples ?? 0) > 0 && <ZoneDetails result={result} />}
 
-      {/* ── 압박 반응형 소리 ── */}
+      {/* ── 처방 카드 ── */}
       {result.pressureSensitiveWords.length > 0 && (
         <InsightCard
           threshold="recording"
           title="압박에만 반응한 소리"
           words={result.pressureSensitiveWords}
+          action={<RegisterChallengeAction words={result.pressureSensitiveWords} />}
         />
       )}
 
-      {/* ── 소리 자체가 어려운 소리 ── */}
       {result.hardSoundWords.length > 0 && (
         <InsightCard
           threshold="whisper"
           title="속삭임에서도 걸린 소리"
           words={result.hardSoundWords}
+          action={
+            <PracticeAction onStart={() => setPractice(getStrategy(HARD_SOUND_STRATEGY) ?? null)} />
+          }
         />
       )}
 
-      {/* ── 예상 vs 실제 ── */}
-      {result.overpredictedWords.length > 0 && (
+      {overpredictedCards.length > 0 && (
         <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
           <h3 className="text-sm font-semibold text-teal-800 mb-1">💚 생각보다 잘 나온 소리</h3>
           <p className="text-xs text-teal-700 leading-relaxed mb-3">
             어렵다고 예상했지만 3단계를 모두 통과했어요. 두려움이 실제보다 컸던 소리예요.
           </p>
-          <WordChips words={result.overpredictedWords} color={THRESHOLD_META.none.color} />
+          <WordChips words={overpredictedCards.map(c => c.text)} color={THRESHOLD_META.none.color} />
+          <div className="mt-3">
+            <RememberEvidenceAction cards={overpredictedCards} />
+          </div>
         </div>
       )}
 
@@ -183,6 +202,60 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
             이 소리들이 줄어드는 것 자체가 인식이 좋아지고 있다는 신호예요.
           </p>
           <WordChips words={result.unknownWords} color={THRESHOLD_META.unknown.color} />
+        </div>
+      )}
+
+      {practice && (
+        <QuickPracticeModal
+          strategy={practice}
+          blockedWords={result.hardSoundWords}
+          onClose={() => setPractice(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 조음 위치: 기본은 접어 두고, 열면 단순 목록으로만 보여준다 ──────────
+function ZoneDetails({ result }: { result: SoundMapResult }) {
+  const [open, setOpen] = useState(false);
+  const rows = ZONES
+    .map(z => ({ zone: z, count: result.zoneBlockage[z] }))
+    .filter(r => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+      >
+        <span className="text-sm font-semibold text-gray-700">발음 기관별 세부 정보 보기</span>
+        <ChevronDown
+          size={16}
+          className={`ml-auto shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+          {rows.length === 0 ? (
+            <p className="text-xs text-gray-400">자음에서 걸린 소리가 없어 표시할 정보가 없어요.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {rows.map(r => (
+                <li key={r.zone} className="flex items-center justify-between py-2">
+                  <span className="text-sm text-gray-700">{r.zone}</span>
+                  <span className="text-sm text-gray-500 tabular-nums">{r.count}회</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[11px] text-gray-400 mt-3 leading-relaxed">
+            표본 수가 적어 참고용 정보입니다.
+            {' '}자음 {result.zoneSamples}개 기준이며, 모음은 조음 위치 집계에서 제외했어요.
+          </p>
         </div>
       )}
     </div>
@@ -220,11 +293,12 @@ function WordChips({ words, color }: { words: string[]; color: string }) {
 }
 
 function InsightCard({
-  threshold, title, words,
+  threshold, title, words, action,
 }: {
   threshold: PressureThreshold;
   title: string;
   words: string[];
+  action?: React.ReactNode;
 }) {
   const meta = THRESHOLD_META[threshold];
   return (
@@ -238,6 +312,142 @@ function InsightCard({
       </h3>
       <p className="text-xs text-gray-600 leading-relaxed mb-3">{meta.desc}</p>
       <WordChips words={words} color={meta.color} />
+      {action && <div className="mt-3">{action}</div>}
     </div>
+  );
+}
+
+// ── 처방 버튼 ────────────────────────────────────────────────
+type ActionState = 'idle' | 'busy' | 'done' | 'error';
+
+function ActionButton({
+  state, idleLabel, doneLabel, icon, onClick,
+}: {
+  state: ActionState;
+  idleLabel: string;
+  doneLabel: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}) {
+  if (state === 'done') {
+    return (
+      <p className="flex items-center justify-center gap-1.5 rounded-xl bg-white/70 py-2.5 text-xs font-semibold text-gray-500">
+        <Check size={14} /> {doneLabel}
+      </p>
+    );
+  }
+  return (
+    <div>
+      <button
+        onClick={onClick}
+        disabled={state === 'busy'}
+        className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-white py-2.5 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:text-gray-400 transition-colors"
+      >
+        {icon}
+        {state === 'busy' ? '기록 중…' : idleLabel}
+      </button>
+      {state === 'error' && (
+        <p className="text-[11px] text-red-500 text-center mt-1.5">
+          저장하지 못했어요. 로그인 상태를 확인하고 다시 눌러 주세요.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// 녹음 압박에서만 걸린 소리 → 도전 단어로 등록
+function RegisterChallengeAction({ words }: { words: string[] }) {
+  const { entries, addEntry } = useLogStore();
+  const [state, setState] = useState<ActionState>('idle');
+
+  const already = words.every(w =>
+    entries.some(e => e.word === w && e.note === NOTE_CHALLENGE));
+
+  async function register() {
+    setState('busy');
+    try {
+      for (const word of words) {
+        if (entries.some(e => e.word === word && e.note === NOTE_CHALLENGE)) continue;
+        await addEntry({
+          word,
+          blockedSyllables: [],
+          phonemes: [extractPhoneme(word)].filter(Boolean),
+          situations: [],
+          outcome: '',            // 소리 지도는 실제 대화 결과를 모른다 — 비워 둔다
+          status: 'blocked',
+          isDetailed: false,
+          note: NOTE_CHALLENGE,
+        });
+      }
+      setState('done');
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <ActionButton
+      state={already ? 'done' : state}
+      idleLabel="도전 단어로 등록"
+      doneLabel="도전 단어로 등록됨"
+      icon={<Target size={14} />}
+      onClick={register}
+    />
+  );
+}
+
+// 속삭임에서도 걸린 소리 → 10초 연습
+function PracticeAction({ onStart }: { onStart: () => void }) {
+  return (
+    <button
+      onClick={onStart}
+      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-white py-2.5 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors"
+    >
+      <Timer size={14} />
+      10초 연습하기
+    </button>
+  );
+}
+
+// 예상보다 잘 나온 소리 → 성공 증거로 기록
+// expectedFear/actualDifficulty 를 함께 남겨 통계 탭의 '예상 vs 실제' 에도 반영되게 한다.
+function RememberEvidenceAction({ cards }: { cards: SoundMapCardResult[] }) {
+  const { entries, addEntry } = useLogStore();
+  const [state, setState] = useState<ActionState>('idle');
+
+  const already = cards.every(c =>
+    entries.some(e => e.word === c.text && e.note === NOTE_EVIDENCE));
+
+  async function remember() {
+    setState('busy');
+    try {
+      for (const c of cards) {
+        if (entries.some(e => e.word === c.text && e.note === NOTE_EVIDENCE)) continue;
+        await addEntry({
+          word: c.text,
+          blockedSyllables: [],
+          phonemes: [extractPhoneme(c.text)].filter(Boolean),
+          situations: [],
+          outcome: '그대로_자연스럽게',
+          status: 'overcome',
+          isDetailed: false,
+          note: NOTE_EVIDENCE,
+          ...(c.fear !== undefined ? { expectedFear: c.fear, actualDifficulty: 1 } : {}),
+        });
+      }
+      setState('done');
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <ActionButton
+      state={already ? 'done' : state}
+      idleLabel="이 증거 기억하기"
+      doneLabel="증거로 기록됨"
+      icon={<Sparkles size={14} />}
+      onClick={remember}
+    />
   );
 }

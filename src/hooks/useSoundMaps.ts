@@ -46,6 +46,13 @@ export async function saveSoundMapResult(
   return full;
 }
 
+// 개발 전용: 로컬에 쌓인 소리 지도를 비운다. 프로덕션(Firestore)에서는 아무것도 하지 않는다.
+export function clearLocalSoundMaps(): void {
+  if (!USE_LOCAL) return;
+  localStorage.removeItem(LOCAL_KEY);
+  window.dispatchEvent(new Event(LOCAL_EVENT));
+}
+
 // 가장 최근 소리 지도를 구독.
 export function useLatestSoundMap(): { latest: SoundMapResult | null; loading: boolean } {
   const [latest, setLatest] = useState<SoundMapResult | null>(null);

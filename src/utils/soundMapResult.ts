@@ -1,12 +1,12 @@
 // 소리 지도(Sound Map Test) 결과 분석 — Part 3.
 //
-// 핵심 지표는 "압력 임계점": 속삭임 → 목소리 → 녹음 사다리에서 처음 무너지는 지점.
+// 핵심 지표는 "압력 임계점": 속삭임 → 목소리 → 녹음 사다리에서 처음 걸리는 지점.
 // 속삭임부터 걸리면 소리 자체(운동성)가 어려운 것이고,
-// 속삭임·목소리는 멀쩡한데 녹음에서만 무너지면 압박(불안)에 반응하는 것이다.
+// 속삭임·목소리는 멀쩡한데 녹음에서만 걸리면 압박(불안)에 반응하는 것이다.
 // 이 둘은 대응 방법이 정반대라 반드시 구분해야 한다.
 
 import { ArticulationZone, phonemeToZones } from './phonetics';
-import { extractPhoneme, extractVowel } from './phoneme';
+import { extractPhoneme } from './phoneme';
 import {
   SoundCard, SoundKind, SoundResponse, RecordingMode,
 } from '../data/soundMap';
@@ -32,7 +32,7 @@ export const THRESHOLD_META: Record<PressureThreshold, {
     label: '압박 반응',
     color: '#f59e0b',
     tint: 'rgba(245,158,11,0.14)',
-    desc: '혼자 말할 땐 괜찮은데 녹음이 켜지면 무너지는 소리예요. 소리보다 압박이 원인이에요.',
+    desc: '혼자 말할 땐 괜찮은데 녹음이 켜지면 걸리는 소리예요. 소리보다 압박이 원인이에요.',
   },
   normal: {
     label: '목소리부터',
@@ -117,9 +117,11 @@ export interface SoundMapResult {
   cards: SoundMapCardResult[];
   thresholdCounts: Record<PressureThreshold, number>;
   stepStats: StepStat[];
-  // 막힌 소리들의 조음 위치 — ArticulationMap 히트맵용
+  // 걸린 소리들의 조음 위치 (자음만 집계 — 모음/음가 없는 초성 'ㅇ' 은 제외)
   zoneBlockage: Record<ArticulationZone, number>;
-  pressureSensitiveWords: string[];  // 녹음에서만 무너진 소리
+  // 조음 위치 집계에 실제로 들어간 카드 수. 표본이 적으면 참고용임을 밝히기 위해 쓴다.
+  zoneSamples: number;
+  pressureSensitiveWords: string[];  // 녹음에서만 걸린 소리
   hardSoundWords: string[];          // 속삭임에서도 걸린 소리
   overpredictedWords: string[];      // 무섭다고 했는데 다 통과한 소리
   unknownWords: string[];            // 판단이 어려웠던 소리
@@ -131,10 +133,13 @@ function emptyZoneBlockage(): Record<ArticulationZone, number> {
   return { 입술: 0, 혀끝: 0, 입천장: 0, 연구개: 0, 성대: 0 };
 }
 
-// 카드의 대표 음소. 모음 카드는 초성이 항상 'ㅇ' 이라 중성을 봐야 조음 위치가 맞다.
-function representativePhoneme(card: SoundCard): string {
-  if (card.kind === 'vowel') return extractVowel(card.text) || extractPhoneme(card.text);
-  return extractPhoneme(card.text);
+// 조음 위치(입술·혀끝·입천장·연구개·성대)는 본래 자음의 개념이다.
+// 모음의 전설/후설은 같은 축이 아니라서 함께 세면 통계가 왜곡된다 — 모음 카드는 아예 제외한다.
+// 자음·나의 단어도 초성이 'ㅇ'(음가 없는 초성)이면 조음 위치로 볼 수 없어 제외한다.
+function consonantPhoneme(card: SoundCard): string {
+  if (card.kind === 'vowel') return '';
+  const p = extractPhoneme(card.text);
+  return p === 'ㅇ' ? '' : p;
 }
 
 // 모든 카드에 예상 긴장도 + 3단계 응답이 있어야 완료로 본다('모르겠음'도 응답으로 인정).
@@ -163,6 +168,7 @@ export function computeSoundMapResult(
   const unknownWords: string[] = [];
   let micCards = 0;
   let manualCards = 0;
+  let zoneSamples = 0;
 
   const cardResults: SoundMapCardResult[] = cards.map(card => {
     const r = responses[card.id];
@@ -176,10 +182,12 @@ export function computeSoundMapResult(
     if (threshold === 'unknown') unknownWords.push(card.text);
     if (fearGap === 'over') overpredictedWords.push(card.text);
 
-    // 어디선가 무너진 소리만 히트맵에 반영 (안전지대·판단불가는 제외)
+    // 어디선가 걸린 소리만 조음 위치 집계에 반영 (안전지대·판단불가는 제외)
     if (threshold === 'whisper' || threshold === 'normal' || threshold === 'recording') {
-      for (const zone of phonemeToZones(representativePhoneme(card))) {
-        zoneBlockage[zone] += 1;
+      const p = consonantPhoneme(card);
+      if (p) {
+        for (const zone of phonemeToZones(p)) zoneBlockage[zone] += 1;
+        zoneSamples += 1;
       }
     }
 
@@ -222,6 +230,7 @@ export function computeSoundMapResult(
     thresholdCounts,
     stepStats,
     zoneBlockage,
+    zoneSamples,
     pressureSensitiveWords,
     hardSoundWords,
     overpredictedWords,
@@ -240,10 +249,10 @@ export function summarizeSoundMap(result: SoundMapResult): string {
     return `${totalCards}개 소리가 3단계를 모두 통과했어요. 아주 좋아요! 👏`;
   }
   if (broken === 0) {
-    return '무너진 소리는 없었어요. 판단이 어려웠던 소리만 남아 있어요.';
+    return '걸린 소리는 없었어요. 판단이 어려웠던 소리만 남아 있어요.';
   }
   if (t.recording >= t.normal && t.recording >= t.whisper) {
-    return `${t.recording}개 소리가 녹음 압박에서만 무너졌어요 — 소리보다 압박이 원인이에요.`;
+    return `${t.recording}개 소리가 녹음 압박에서만 걸렸어요 — 소리보다 압박이 원인이에요.`;
   }
   if (t.whisper >= t.normal) {
     return `${t.whisper}개 소리는 속삭임에서도 걸렸어요 — 소리 자체의 난이도가 높아요.`;

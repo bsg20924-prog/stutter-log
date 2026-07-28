@@ -503,16 +503,17 @@ function DoneScreen({
       return;
     }
 
-    let alive = true;
+    // 언마운트 플래그(alive)를 두면 안 된다: StrictMode 는 effect 를 실행 → 정리 → 재실행하는데,
+    // 재실행은 ranRef 때문에 바로 빠져나가므로 첫 저장의 then 만 남는다.
+    // 그때 alive 가 이미 false 면 setResult 가 영영 호출되지 않아 "만드는 중..." 에서 멈춘다.
+    // 중복 저장은 ranRef 가 막고 있고, React 18 에서 언마운트 후 setState 는 조용한 no-op 이다.
     saveSoundMapResult(computed)
-      .then(saved => { if (alive) setResult(saved); })
+      .then(setResult)
       .catch(() => {
         // 저장에 실패해도 방금 만든 지도는 반드시 보여준다.
-        if (!alive) return;
         setResult(stamp());
         setUnsaved(true);
       });
-    return () => { alive = false; };
   }, [cards, responses]);
 
   if (!result) {
