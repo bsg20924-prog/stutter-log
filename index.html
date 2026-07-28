@@ -2,8 +2,21 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <!-- viewport-fit=cover 는 쓰지 않는다: 노치/홈 인디케이터 영역까지 뷰포트가 넓어지는데
+         현재 레이아웃에 safe-area 패딩이 없어 헤더와 하단 탭이 가려진다.
+         기본값이면 iOS 가 알아서 안전 영역을 뺀 뷰포트를 준다. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stutter Log</title>
+    <meta name="theme-color" content="#0d9488" />
+    <meta name="description" content="말막힘을 기록하고, 소리 지도로 어느 압력에서 왜 걸리는지 찾아보세요." />
+
+    <!-- iOS 홈 화면 추가 시 전체 화면으로 실행 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="말막힘 일지" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+
+    <title>말막힘 일지</title>
   </head>
   <body>
     <div id="root"></div>

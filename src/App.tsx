@@ -17,6 +17,7 @@ import QuickLogInput from './components/QuickLogInput';
 import ChallengeList from './components/ChallengeList';
 import SoundMapPanel from './components/SoundMapPanel';
 import SoundMapTest from './components/SoundMapTest';
+import InstallPrompt from './components/InstallPrompt';
 import './index.css';
 
 type Tab = 'record' | 'log' | 'challenge' | 'soundmap' | 'stats';
@@ -76,6 +77,7 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
         <div className="max-w-lg mx-auto px-4 pt-4 pb-32">
           {activeTab === 'record' && (
             <div className="space-y-4">
+              <InstallPrompt />
               {!soundMapLoading && !soundMap && (
                 <SoundMapPromptCard onStart={() => setShowSoundMap(true)} />
               )}
