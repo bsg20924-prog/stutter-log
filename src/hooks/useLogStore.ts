@@ -127,6 +127,31 @@ const COLLECTION = 'logs';
 const LOCAL_KEY = 'stutter_log';
 const MIGRATED_KEY = 'stutter_log_migrated';
 
+// 개발 서버(npm run dev)는 로그인을 건너뛰므로 Firestore 규칙에 막힌다.
+// useDiagnostics / useSoundMaps 와 같은 방식으로 localStorage 에 저장한다.
+// 저장소 키는 구형 마이그레이션 소스(LOCAL_KEY)와 반드시 분리한다 —
+// 같은 키를 쓰면 개발 중 만든 테스트 기록이 나중에 프로덕션 Firestore 로 업로드된다.
+const USE_LOCAL = import.meta.env.DEV;
+const DEV_KEY = 'stutter_log_dev';
+const DEV_EVENT = 'stutter-log-dev-changed';
+
+function readDevEntries(): LogEntry[] {
+  try {
+    const raw = localStorage.getItem(DEV_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>[]) : [];
+    return parsed
+      .map(migrate)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));  // Firestore 와 같은 정렬
+  } catch {
+    return [];
+  }
+}
+
+function writeDevEntries(list: LogEntry[]): void {
+  localStorage.setItem(DEV_KEY, JSON.stringify(list));
+  window.dispatchEvent(new Event(DEV_EVENT));
+}
+
 async function migrateFromLocalStorage() {
   if (localStorage.getItem(MIGRATED_KEY)) return;
   const raw = localStorage.getItem(LOCAL_KEY);
@@ -150,6 +175,22 @@ export function LogStoreProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 개발 모드: localStorage 를 원본으로 삼고, 구형 마이그레이션은 건드리지 않는다.
+    if (USE_LOCAL) {
+      const refresh = () => {
+        setEntries(readDevEntries());
+        setLoading(false);
+      };
+      refresh();
+      // 같은 탭 변경(DEV_EVENT) + 다른 탭 변경(storage) 모두 반영
+      window.addEventListener(DEV_EVENT, refresh);
+      window.addEventListener('storage', refresh);
+      return () => {
+        window.removeEventListener(DEV_EVENT, refresh);
+        window.removeEventListener('storage', refresh);
+      };
+    }
+
     let unsub: (() => void) | null = null;
 
     migrateFromLocalStorage().then(() => {
@@ -179,6 +220,10 @@ export function LogStoreProvider({ children }: { children: React.ReactNode }) {
       id: uuidv4(),
       createdAt: new Date().toISOString(),
     };
+    if (USE_LOCAL) {
+      writeDevEntries([newEntry, ...readDevEntries()]);
+      return newEntry;
+    }
     await setDoc(doc(db, COLLECTION, newEntry.id), newEntry);
     return newEntry;
   }, []);
@@ -186,10 +231,19 @@ export function LogStoreProvider({ children }: { children: React.ReactNode }) {
   const updateEntry = useCallback(async (id: string, updates: Omit<LogEntry, 'id' | 'createdAt'>) => {
     const existing = entries.find(e => e.id === id);
     if (!existing) return;
-    await setDoc(doc(db, COLLECTION, id), { ...updates, id, createdAt: existing.createdAt });
+    const updated: LogEntry = { ...updates, id, createdAt: existing.createdAt };
+    if (USE_LOCAL) {
+      writeDevEntries(readDevEntries().map(e => (e.id === id ? updated : e)));
+      return;
+    }
+    await setDoc(doc(db, COLLECTION, id), updated);
   }, [entries]);
 
   const deleteEntry = useCallback(async (id: string) => {
+    if (USE_LOCAL) {
+      writeDevEntries(readDevEntries().filter(e => e.id !== id));
+      return;
+    }
     await deleteDoc(doc(db, COLLECTION, id));
   }, []);
 
