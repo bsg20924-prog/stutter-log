@@ -7,9 +7,11 @@
 // 중간에 await 를 끼우면 제스처 컨텍스트가 끊겨 iOS 에서 소리가 조용히 사라진다.
 
 import { useState, useEffect, useRef, useCallback, useMemo, KeyboardEvent } from 'react';
-import { MessageSquare, Volume2, VolumeX, Play, ChevronRight, Plus, X } from 'lucide-react';
 import {
-  SimScenario, SimSentence, AMBIENT_META, RESPONSE_WINDOW_SEC, buildScenarios,
+  MessageSquare, Volume2, VolumeX, Play, ChevronRight, Plus, X, Mic, Smartphone,
+} from 'lucide-react';
+import {
+  SimScenario, SimSentence, AmbientKey, AMBIENT_META, RESPONSE_WINDOW_SEC, buildScenarios,
 } from '../data/simulation';
 import { Assessment, ASSESSMENTS, UNKNOWN_ASSESSMENT } from '../data/soundMap';
 import { SimSentenceResponse } from '../utils/simulationResult';
@@ -17,6 +19,17 @@ import {
   primeAudio, speakPrompt, cancelSpeech, warmUpVoices, hasKoreanVoice,
   SpeakHandle, SpeechOutcome,
 } from '../utils/speech';
+import { useSimRecorder, isSimRecordingSupported } from '../hooks/useSimRecorder';
+import { checkAmbientAvailable, createAmbientPlayer, AmbientPlayer } from '../utils/ambient';
+
+/** 녹음 동의 문구 — 저장 위치를 오해할 여지 없이 한 줄로 못 박는다. */
+export const RECORDING_CONSENT = '이 녹음은 이 기기에만 저장돼요.';
+
+interface SimulationSetup {
+  scenarios: SimScenario[];
+  recordEnabled: boolean;
+  ambientEnabled: boolean;
+}
 
 // 프롬프트 재생 → 카운트다운 → 응답 창 → 자가 평가
 type Phase = 'ready' | 'prompt' | 'countdown' | 'respond' | 'assess';
@@ -28,17 +41,22 @@ export default function SimulationRunner({
   challengeWords, onFinish, onSkip,
 }: {
   challengeWords: string[];
-  onFinish: (scenarios: SimScenario[], responses: Record<string, SimSentenceResponse>) => void;
+  onFinish: (
+    scenarios: SimScenario[],
+    responses: Record<string, SimSentenceResponse>,
+    /** 이 세션에 저장된 녹음을 소리 지도에 연결하기 위한 키 (녹음이 없으면 undefined) */
+    recordingSessionId?: string,
+  ) => void;
   onSkip: () => void;
 }) {
-  const [scenarios, setScenarios] = useState<SimScenario[] | null>(null);
+  const [setup, setSetup] = useState<SimulationSetup | null>(null);
   const [responses, setResponses] = useState<Record<string, SimSentenceResponse>>({});
 
-  if (!scenarios) {
+  if (!setup) {
     return (
       <SimulationIntro
         challengeWords={challengeWords}
-        onStart={setScenarios}
+        onStart={setSetup}
         onSkip={onSkip}
       />
     );
@@ -46,10 +64,10 @@ export default function SimulationRunner({
 
   return (
     <ScenarioPlayer
-      scenarios={scenarios}
+      setup={setup}
       responses={responses}
       onRespond={(id, r) => setResponses(prev => ({ ...prev, [id]: r }))}
-      onFinish={() => onFinish(scenarios, responses)}
+      onFinish={sessionId => onFinish(setup.scenarios, responses, sessionId)}
     />
   );
 }
@@ -59,12 +77,18 @@ function SimulationIntro({
   challengeWords, onStart, onSkip,
 }: {
   challengeWords: string[];
-  onStart: (scenarios: SimScenario[]) => void;
+  onStart: (setup: SimulationSetup) => void;
   onSkip: () => void;
 }) {
   const [custom, setCustom] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [koVoice, setKoVoice] = useState(hasKoreanVoice());
+  // 녹음은 기본 꺼짐. 사용자가 켜서 하는 것이지, 몰랐는데 켜져 있으면 안 된다.
+  const [record, setRecord] = useState(false);
+  const [ambient, setAmbient] = useState(false);
+  // 배경음 파일이 실제로 있는지 — 없으면 토글 자체를 감춘다.
+  // 눌러도 아무 일이 없는 스위치는 사용자에게 '고장'으로 읽힌다.
+  const [ambientReady, setAmbientReady] = useState(false);
   // 자동 생성 문장 중 사용자가 뺀 것.
   // 도전 단어가 이름이면 '김민수 포장해 주세요' 같은 문장이 나오는데,
   // 그 단어가 이름인지 메뉴인지는 사용자만 안다 — 자동으로는 절대 못 가른다.
@@ -73,6 +97,18 @@ function SimulationIntro({
 
   // 목소리 목록은 비동기로 채워진다 — 미리 데워 두고 준비되면 안내 문구를 바꾼다.
   useEffect(() => warmUpVoices(() => setKoVoice(hasKoreanVoice())), []);
+
+  // 배경음은 하나라도 재생 가능하면 토글을 보여준다.
+  useEffect(() => {
+    let alive = true;
+    const keys: AmbientKey[] = ['cafe', 'office', 'phone'];
+    void Promise.all(keys.map(checkAmbientAvailable)).then(results => {
+      if (alive) setAmbientReady(results.some(Boolean));
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const canRecord = isSimRecordingSupported();
 
   const preview = useMemo(
     () => buildScenarios(challengeWords, custom),
@@ -221,8 +257,52 @@ function SimulationIntro({
         </p>
       </div>
 
+      {/* 녹음 · 배경음 옵션 */}
+      {(canRecord || ambientReady) && (
+        <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4 space-y-3">
+          {canRecord && (
+            <>
+              <ToggleRow
+                icon={<Mic size={15} className="text-gray-400" />}
+                title="내 목소리 녹음해서 다시 듣기"
+                desc="말한 뒤 바로 들어보면 스스로 어땠는지 훨씬 정확해져요."
+                checked={record}
+                onChange={setRecord}
+              />
+              {/* 켜는 순간에만, 저장 위치를 오해 없이 못 박는다 */}
+              {record && (
+                <div className="flex items-start gap-1.5 rounded-xl bg-teal-50 border border-teal-200 px-3 py-2.5">
+                  <Smartphone size={14} className="shrink-0 text-teal-600 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-semibold text-teal-800">{RECORDING_CONSENT}</p>
+                    <p className="text-[11px] text-teal-700 leading-relaxed mt-0.5">
+                      서버에 올라가지 않고, 다른 기기에서도 보이지 않아요.
+                      결과 화면에서 언제든 지울 수 있어요.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {ambientReady && (
+            <ToggleRow
+              icon={<Volume2 size={15} className="text-gray-400" />}
+              title="배경 소음 켜기"
+              desc="카페·사무실 소리를 작게 깔아 실제 상황에 가깝게 만들어요."
+              checked={ambient}
+              onChange={setAmbient}
+            />
+          )}
+        </div>
+      )}
+
       <button
-        onClick={() => onStart(finalScenarios)}
+        onClick={() => onStart({
+          scenarios: finalScenarios,
+          recordEnabled: record && canRecord,
+          ambientEnabled: ambient && ambientReady,
+        })}
         disabled={sentenceCount === 0}
         className="w-full rounded-xl py-3.5 text-sm font-semibold bg-teal-500 text-white disabled:bg-gray-200 disabled:text-gray-400 hover:bg-teal-600 transition-colors"
       >
@@ -241,15 +321,60 @@ function SimulationIntro({
   );
 }
 
+// 인트로의 옵션 스위치 (녹음 / 배경음)
+function ToggleRow({
+  icon, title, desc, checked, onChange,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-gray-700">
+          {icon}{title}
+        </p>
+        <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={title}
+        onClick={() => onChange(!checked)}
+        className={[
+          'relative shrink-0 w-11 h-6 rounded-full transition-colors',
+          checked ? 'bg-teal-500' : 'bg-gray-200',
+        ].join(' ')}
+      >
+        <span
+          className={[
+            'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
+            checked ? 'left-[22px]' : 'left-0.5',
+          ].join(' ')}
+        />
+      </button>
+    </div>
+  );
+}
+
 // ── 시나리오 진행 ────────────────────────────────────────────
 function ScenarioPlayer({
-  scenarios, responses, onRespond, onFinish,
+  setup, responses, onRespond, onFinish,
 }: {
-  scenarios: SimScenario[];
+  setup: SimulationSetup;
   responses: Record<string, SimSentenceResponse>;
   onRespond: (sentenceId: string, r: SimSentenceResponse) => void;
-  onFinish: () => void;
+  onFinish: (recordingSessionId?: string) => void;
 }) {
+  const { scenarios, recordEnabled, ambientEnabled } = setup;
+  const recorder = useSimRecorder(recordEnabled);
+  const ambientRef = useRef<AmbientPlayer | null>(null);
+  if (ambientEnabled && !ambientRef.current) ambientRef.current = createAmbientPlayer();
+
   const [scenarioIdx, setScenarioIdx] = useState(0);
   const [sentenceIdx, setSentenceIdx] = useState(0);
   const [phase, setPhase] = useState<Phase>('ready');
@@ -277,11 +402,17 @@ function ScenarioPlayer({
     }
   }, []);
 
-  // 화면을 벗어나면 남은 발화와 타이머를 반드시 정리한다.
+  // 응답 창을 끝내는 유일한 경로 — 시간 만료·"다 말했어요" 둘 다 여기를 지난다.
+  // 타이머 콜백이 옛 문장을 붙들지 않도록 ref 로 항상 최신 함수를 가리키게 한다.
+  const endResponseRef = useRef<() => void>(() => {});
+
+  // 화면을 벗어나면 남은 발화·타이머·배경음을 반드시 정리한다.
+  // (마이크는 useSimRecorder 가 자체 언마운트 정리로 반납한다)
   useEffect(() => () => {
     genRef.current += 1;
     speakRef.current?.cancel();
     cancelSpeech();
+    ambientRef.current?.stop();
     if (timerRef.current !== null) window.clearInterval(timerRef.current);
   }, []);
 
@@ -299,6 +430,9 @@ function ScenarioPlayer({
   const startResponseWindow = useCallback((gen: number) => {
     if (genRef.current !== gen) return;
     setPhase('respond');
+    // 응답 창에 들어올 때만 녹음한다 — 프롬프트나 카운트다운은 담지 않는다.
+    recorder.start();
+    ambientRef.current?.unduck();
     let left = RESPONSE_WINDOW_SEC;
     setRespondLeft(left);
     clearTimer();
@@ -306,11 +440,11 @@ function ScenarioPlayer({
       if (genRef.current !== gen) return;
       left -= 1;
       setRespondLeft(left);
-      if (left <= 0) {
-        clearTimer();
-        setPhase('assess');
-      }
+      if (left <= 0) endResponseRef.current();
     }, 1000);
+    // recorder/ambient 는 ref 성격이라 의존성에 넣지 않는다 — 넣으면 매 렌더마다
+    // 콜백이 새로 만들어져 카운트다운 타이머가 재생성된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearTimer]);
 
   const startCountdown = useCallback((gen: number) => {
@@ -341,6 +475,11 @@ function ScenarioPlayer({
     const gen = genRef.current;
 
     primeAudio();                 // (1) 제스처 안에서 오디오 잠금 해제
+    recorder.arm();               //     마이크 권한도 이 제스처 안에서 확보해야 iOS 가 허용한다
+    if (ambientEnabled && scenario.ambientKey) {
+      ambientRef.current?.play(scenario.ambientKey);
+      ambientRef.current?.duck();   // 상대가 말하는 동안은 낮춘다
+    }
     setPhase('prompt');
     setOutcome(null);
 
@@ -351,6 +490,20 @@ function ScenarioPlayer({
     });
   }
 
+  // 렌더마다 최신 문장을 담아 갱신한다 (ref 대입은 부작용이 없다).
+  endResponseRef.current = () => {
+    clearTimer();
+    ambientRef.current?.duck();
+    if (recordEnabled && sentence) {
+      void recorder.stopAndSave({
+        sentenceId: sentence.id,
+        scenarioLabel: scenario.label,
+        text: sentence.text,
+      });
+    }
+    setPhase('assess');
+  };
+
   function goNext() {
     if (sentenceIdx < scenario.responseSentences.length - 1) {
       setSentenceIdx(sentenceIdx + 1);
@@ -358,7 +511,8 @@ function ScenarioPlayer({
       setScenarioIdx(scenarioIdx + 1);
       setSentenceIdx(0);
     } else {
-      onFinish();
+      // 녹음을 켰을 때만 세션 id 를 넘긴다 — 나중에 소리 지도에 클립을 연결하는 열쇠다.
+      onFinish(recordEnabled ? recorder.sessionId : undefined);
     }
   }
 
@@ -377,6 +531,7 @@ function ScenarioPlayer({
     genRef.current += 1;
     clearTimer();
     cancelSpeech();
+    recorder.discard();   // 건너뛴 문장의 녹음은 저장하지 않는다
     goNext();
   }
 
@@ -384,7 +539,7 @@ function ScenarioPlayer({
     return (
       <div className="py-20 text-center">
         <p className="text-sm text-gray-400 mb-4">진행할 문장이 없어요.</p>
-        <button onClick={onFinish} className="text-sm font-semibold text-teal-600">결과 보기</button>
+        <button onClick={() => onFinish()} className="text-sm font-semibold text-teal-600">결과 보기</button>
       </div>
     );
   }
@@ -420,7 +575,22 @@ function ScenarioPlayer({
             {ambient.emoji} {ambient.label}
           </span>
         )}
+        {recordEnabled && recorder.savedCount > 0 && (
+          <span className="ml-auto flex items-center gap-1 text-[11px] text-gray-400">
+            <Mic size={11} /> {recorder.savedCount}개 저장됨
+          </span>
+        )}
       </div>
+
+      {/* 마이크를 거부해도 시뮬레이션은 계속된다 — 녹음만 빠진다 */}
+      {recordEnabled && recorder.state === 'denied' && (
+        <div className="flex items-start gap-1.5 rounded-xl bg-gray-100 px-3 py-2 mb-3">
+          <VolumeX size={13} className="shrink-0 text-gray-400 mt-0.5" />
+          <p className="text-[11px] text-gray-500 leading-relaxed">
+            마이크를 쓸 수 없어 녹음은 남지 않아요. 시뮬레이션은 그대로 진행돼요.
+          </p>
+        </div>
+      )}
 
       {/* 상대의 말 — 말풍선. TTS 가 안 되는 기기에서는 이게 유일한 전달 수단이다. */}
       <div className="mb-3">
@@ -474,8 +644,14 @@ function ScenarioPlayer({
         <div className="rounded-2xl bg-teal-50 border border-teal-200 py-8 text-center">
           <p className="text-sm font-semibold text-teal-800">지금 말하세요</p>
           <p className="text-4xl font-bold text-teal-600 tabular-nums mt-2">{Math.max(0, respondLeft)}</p>
+          {recorder.state === 'recording' && (
+            <p className="flex items-center justify-center gap-1.5 text-[11px] text-teal-700 mt-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              이 기기에 녹음 중
+            </p>
+          )}
           <button
-            onClick={() => { clearTimer(); setPhase('assess'); }}
+            onClick={() => endResponseRef.current()}
             className="mt-3 text-xs font-medium text-teal-700 underline underline-offset-2"
           >
             다 말했어요

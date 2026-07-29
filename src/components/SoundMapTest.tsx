@@ -14,6 +14,7 @@ import {
 } from '../utils/simulationResult';
 import { SimScenario } from '../data/simulation';
 import { saveSoundMapResult } from '../hooks/useSoundMaps';
+import { attachSoundMapId, deleteClipsBySession } from '../utils/recordingStore';
 import { useLogStore } from '../hooks/useLogStore';
 import { getActiveChallengeWords } from '../utils/challenge';
 import RecordingPressurePanel from './RecordingPressurePanel';
@@ -32,6 +33,8 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [confirmExit, setConfirmExit] = useState(false);
   const [countdownOn, setCountdownOn] = useState(true);
   const [simulation, setSimulation] = useState<SimulationResult | undefined>();
+  // 녹음은 소리 지도가 저장되기 전에 만들어진다 — 저장 후 이 키로 지도 id 를 붙인다.
+  const [recordingSessionId, setRecordingSessionId] = useState<string | undefined>();
 
   // Stage 4 문장 재료 — 아직 극복하지 못한 도전 단어를 그대로 쓴다.
   const { entries } = useLogStore();
@@ -81,7 +84,9 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   function finishSimulation(
     scenarios: SimScenario[],
     simResponses: Record<string, SimSentenceResponse>,
+    sessionId?: string,
   ) {
+    setRecordingSessionId(sessionId);
     const result = buildSimulationResult(scenarios, simResponses);
     // 한 문장도 평가하지 않았으면 Stage 4 를 안 한 것으로 취급한다 —
     // 빈 결과를 저장하면 "상황에서 걸린 게 없음"과 "해보지 않음"이 구분되지 않는다.
@@ -172,6 +177,7 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
               cards={cards}
               responses={responses}
               simulation={simulation}
+              recordingSessionId={recordingSessionId}
               onClose={onClose}
             />
           )}
@@ -534,11 +540,12 @@ function SpeakInput({
 
 // 완료 화면 — 결과를 계산하고, 완주한 경우에만 저장한 뒤 지도를 보여준다.
 function DoneScreen({
-  cards, responses, simulation, onClose,
+  cards, responses, simulation, recordingSessionId, onClose,
 }: {
   cards: SoundCard[];
   responses: Record<string, SoundResponse>;
   simulation?: SimulationResult;
+  recordingSessionId?: string;
   onClose: () => void;
 }) {
   const [result, setResult] = useState<SoundMapResult | null>(null);
@@ -553,8 +560,16 @@ function DoneScreen({
     const computed = computeSoundMapResult(cards, responses, simulation);
     const stamp = () => ({ ...computed, id: 'unsaved', createdAt: new Date().toISOString() });
 
+    // 지도를 저장하지 못하면 녹음도 남기지 않는다.
+    // "진행 상황은 저장되지 않아요"라고 안내해 놓고 오디오만 기기에 남으면
+    // 사용자가 예상하지 못한 데이터가 쌓이고, 나중에 지울 방법도 없어진다.
+    const dropOrphanClips = () => {
+      if (recordingSessionId) void deleteClipsBySession(recordingSessionId);
+    };
+
     // 중간에 빠져나온 기록은 저장하지 않는다 (화면에서만 보여줌).
     if (!isSoundMapComplete(cards, responses)) {
+      dropOrphanClips();
       setResult(stamp());
       setUnsaved(true);
       return;
@@ -565,13 +580,22 @@ function DoneScreen({
     // 그때 alive 가 이미 false 면 setResult 가 영영 호출되지 않아 "만드는 중..." 에서 멈춘다.
     // 중복 저장은 ranRef 가 막고 있고, React 18 에서 언마운트 후 setState 는 조용한 no-op 이다.
     saveSoundMapResult(computed)
-      .then(setResult)
+      .then(saved => {
+        // 녹음은 지도보다 먼저 만들어지므로, 지도 id 가 정해진 지금 뒤늦게 붙인다.
+        // 실패해도 결과 표시는 막지 않는다 — 오디오가 새어 나가는 일은 어차피 없다.
+        if (recordingSessionId) {
+          void attachSoundMapId(recordingSessionId, saved.id).finally(() => setResult(saved));
+        } else {
+          setResult(saved);
+        }
+      })
       .catch(() => {
         // 저장에 실패해도 방금 만든 지도는 반드시 보여준다.
+        dropOrphanClips();
         setResult(stamp());
         setUnsaved(true);
       });
-  }, [cards, responses, simulation]);
+  }, [cards, responses, simulation, recordingSessionId]);
 
   if (!result) {
     return (
@@ -589,6 +613,7 @@ function DoneScreen({
         {unsaved && (
           <p className="text-xs text-amber-600 mt-2">
             이번 기록은 저장되지 않았어요. 화면을 닫으면 사라집니다.
+            {recordingSessionId && ' 녹음도 함께 지웠어요.'}
           </p>
         )}
       </div>

@@ -25,6 +25,7 @@ import { ZONES } from '../utils/phonetics';
 import { extractPhoneme } from '../utils/phoneme';
 import { getStrategy, Strategy, STRATEGY_CATEGORIES } from '../data/strategies';
 import { useLogStore } from '../hooks/useLogStore';
+import RecordingList from './RecordingList';
 import QuickPracticeModal from './QuickPracticeModal';
 import StrategyDetailModal from './StrategyDetailModal';
 import ArticulationMap from './ArticulationMap';
@@ -394,6 +395,9 @@ function SimulationSummary({ result }: { result: SoundMapResult }) {
           </div>
         </div>
       )}
+
+      {/* 이 기기에 저장된 녹음 — 없으면 통째로 렌더되지 않는다 */}
+      <RecordingList soundMapId={result.id} />
 
       {/* 소리 지도에 없어서 원인을 가릴 수 없는 단어 */}
       {unmatched.length > 0 && (
