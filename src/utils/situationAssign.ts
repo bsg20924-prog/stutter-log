@@ -15,7 +15,11 @@ import { generateSituationSentences, hasGeminiKey } from './gemini';
 // 한 상황에만 몰리면 그 상황 하나만 재는 셈이 된다.
 const ALL_IDS = SCENARIO_LIST.map(s => s.id);
 
-function templateFor(card: SoundCard, index: number): SituationAssignment {
+/**
+ * 템플릿 배정 — 네트워크 없이 즉시 만들 수 있다.
+ * 호출부가 4단계를 절대 비워 두지 않도록 시작 시점에 바로 채우는 데도 쓴다.
+ */
+export function templateAssignment(card: SoundCard, index: number): SituationAssignment {
   const meta = SCENARIO_LIST[index % SCENARIO_LIST.length];
   const seed = getScenarioSeed(meta.id)!;
   // 같은 상황이 다시 돌아올 때마다 다른 틀·다른 멘트를 쓴다.
@@ -52,7 +56,7 @@ export async function assignSituations(
   //    이렇게 해야 Gemini 가 일부만 돌려줘도 빈 카드가 생기지 않는다.
   const assignments: Record<string, SituationAssignment> = {};
   cards.forEach((card, i) => {
-    assignments[card.id] = templateFor(card, i);
+    assignments[card.id] = templateAssignment(card, i);
   });
 
   if (!hasGeminiKey()) {

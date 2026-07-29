@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { X, ChevronLeft, Plus, Map as MapIcon, Sparkles } from 'lucide-react';
+import { X, ChevronLeft, Plus, Map as MapIcon } from 'lucide-react';
 import {
   SoundCard, SoundResponse, Assessment, SoundStepId, RecordingMode, SituationAssignment,
   SOUND_STEPS, ASSESSMENTS, UNKNOWN_ASSESSMENT, KIND_LABEL,
   buildDefaultCards, makeCustomCard, SUGGESTED_CUSTOM_WORDS,
 } from '../data/soundMap';
-import { assignSituations } from '../utils/situationAssign';
-import { hasGeminiKey } from '../utils/gemini';
+import { assignSituations, templateAssignment, AssignResult } from '../utils/situationAssign';
 import SituationStep from './SituationStep';
 import { useMicPressure, MicPressure } from '../hooks/useMicPressure';
 import {
@@ -32,8 +31,20 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [countdownOn, setCountdownOn] = useState(true);
   // 카드별 4단계 상황 배정 (Gemini 우선, 실패하면 템플릿)
   const [situations, setSituations] = useState<Record<string, SituationAssignment>>({});
-  const [assigning, setAssigning] = useState(false);
   const [geminiFailed, setGeminiFailed] = useState(false);
+  // 인트로에서 미리 돌려 둔 기본 카드 배정. 사용자가 단어를 넣고 읽는 동안
+  // 생성이 끝나 있으면 4단계에서 기다릴 일이 없다.
+  const prefetchRef = useRef<Promise<AssignResult> | null>(null);
+  // 늦게 도착한 결과를 합칠 때 '이미 답한 카드'를 건너뛰기 위해 최신 응답을 참조한다.
+  const responsesRef = useRef(responses);
+  responsesRef.current = responses;
+
+  // 인트로가 떠 있는 동안 기본 카드 문장을 미리 만들어 둔다.
+  // 사용자가 무서운 단어를 넣고 안내를 읽는 시간이 그대로 생성 시간이 된다.
+  useEffect(() => {
+    if (stage !== 'intro' || prefetchRef.current) return;
+    prefetchRef.current = assignSituations(buildDefaultCards());
+  }, [stage]);
 
   // Stage 4 문장 재료 — 아직 극복하지 못한 도전 단어를 그대로 쓴다.
   const { entries } = useLogStore();
@@ -66,16 +77,31 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
     setResponses({});
     setStage('card');
 
-    // 상황 문장은 시작 시 한 번에 만든다 — 카드마다 호출하면 매번 멈춘다.
-    // 실패해도 템플릿 문장이 이미 채워져 돌아오므로 검사는 그대로 진행된다.
-    setAssigning(hasGeminiKey());
-    try {
-      const result = await assignSituations(allCards);
-      setSituations(result.assignments);
+    // 템플릿 배정을 **즉시** 넣어 4단계가 절대 비어 있지 않게 한다.
+    // assignSituations 는 템플릿을 먼저 채우고 Gemini 로 덮어쓰므로,
+    // 여기서는 결과가 오는 대로 갈아끼우기만 하면 된다 — 기다리지 않는다.
+    const templates: Record<string, SituationAssignment> = {};
+    allCards.forEach((c, i) => { templates[c.id] = templateAssignment(c, i); });
+    setSituations(templates);
+
+    // 인트로에서 미리 돌려 둔 결과가 있으면 그걸 쓴다(기본 카드 한정).
+    const pending = prefetchRef.current ?? assignSituations(allCards);
+    prefetchRef.current = null;
+
+    void pending.then(result => {
+      // 이미 지나간 카드의 문장을 바꾸면 기록과 화면이 어긋난다 —
+      // 아직 4단계 응답이 없는 카드에만 적용한다.
+      setSituations(prev => {
+        const next = { ...prev };
+        for (const [id, a] of Object.entries(result.assignments)) {
+          if (responsesRef.current[id]?.situation === undefined) next[id] = a;
+        }
+        return next;
+      });
       setGeminiFailed(result.geminiFailed);
-    } finally {
-      setAssigning(false);
-    }
+    }).catch(() => {
+      // 실패해도 템플릿이 이미 들어가 있어 검사는 그대로 진행된다.
+    });
   }
 
   // 다음 단계(또는 다음 카드/완료)로 진행
@@ -162,7 +188,6 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
               step={step}
               response={responses[card.id] ?? {}}
               situation={situations[card.id]}
-              assigning={assigning}
               geminiFailed={geminiFailed}
               mic={mic}
               onFear={setFear}
@@ -363,7 +388,7 @@ function IntroScreen({
 
 // ── 카드 진행: 4단계 ──────────────────────────────────────
 function CardRunner({
-  card, cardIndex, total, step, response, situation, assigning, geminiFailed,
+  card, cardIndex, total, step, response, situation, geminiFailed,
   mic, onFear, onAssess, onBack,
 }: {
   card: SoundCard;
@@ -372,7 +397,6 @@ function CardRunner({
   step: number;
   response: SoundResponse;
   situation?: SituationAssignment;
-  assigning: boolean;
   geminiFailed: boolean;
   mic: MicPressure;
   onFear: (n: number) => void;
@@ -438,13 +462,9 @@ function CardRunner({
       {stepDef.id === 'fear' ? (
         <FearInput prompt={stepDef.prompt} value={response.fear} onSelect={onFear} />
       ) : stepDef.id === 'situation' ? (
-        assigning ? (
-          <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] py-10 text-center">
-            <p className="flex items-center justify-center gap-1.5 text-sm text-gray-400">
-              <Sparkles size={14} /> 이 단어에 맞는 문장을 만드는 중...
-            </p>
-          </div>
-        ) : situation ? (
+        // 생성이 끝나기를 기다리지 않는다. 템플릿 문장이 이미 들어가 있고,
+        // AI 문장이 도착하면 아직 답하지 않은 카드부터 조용히 갈아끼운다.
+        situation ? (
           <>
             {geminiFailed && (
               <p className="text-[11px] text-gray-400 mb-2 px-1">
