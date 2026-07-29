@@ -56,8 +56,8 @@ export default function SituationStep({
     setRespondLeft(RESPONSE_WINDOW_SEC);
     // 이 카드의 상대 멘트를 미리 만들어 둔다 (fire-and-forget).
     // 분당 호출 제한이 낮아 한 번에 몰아 만들 수 없으므로, 도달할 때 하나씩 만든다.
-    prefetchTts(assignment.ttsPrompt, getGeminiKey());
-  }, [assignment.sentence, assignment.ttsPrompt, clearTimer]);
+    prefetchTts(assignment.ttsPrompt, getGeminiKey(), assignment.scenarioId);
+  }, [assignment.sentence, assignment.ttsPrompt, assignment.scenarioId, clearTimer]);
 
   // 화면을 벗어나면 남은 발화·타이머를 정리한다.
   useEffect(() => () => {

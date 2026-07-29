@@ -12,7 +12,7 @@ import {
 } from '../utils/speech';
 import {
   GEMINI_VOICES, isGeminiTtsOn, setGeminiTtsOn,
-  getGeminiVoice, setGeminiVoice, generateTts, clearTtsCache,
+  getFixedVoice, setFixedVoice, generateTts, clearTtsCache,
 } from '../utils/geminiTts';
 import { hasGeminiKey, getGeminiKey } from '../utils/gemini';
 
@@ -23,7 +23,7 @@ export default function VoiceSettings() {
   const [selected, setSelected] = useState(getPreferredVoiceName());
   const [auto, setAuto] = useState(currentVoiceName());
   const [aiOn, setAiOn] = useState(isGeminiTtsOn());
-  const [aiVoice, setAiVoice] = useState(getGeminiVoice());
+  const [aiVoice, setAiVoice] = useState(getFixedVoice());   // '' = 상황별 자동
   const [previewing, setPreviewing] = useState('');
   const canUseAi = hasGeminiKey();
 
@@ -41,14 +41,14 @@ export default function VoiceSettings() {
     speakPrompt(SAMPLE, () => {});
   }
 
-  async function chooseAiVoice(id: string) {
+  async function chooseAiVoice(id: string, scenarioId?: string) {
     if (id !== aiVoice) {
       clearTtsCache();          // 목소리가 바뀌면 이전 캐시는 쓸모없다
-      setGeminiVoice(id);
+      setFixedVoice(id);
       setAiVoice(id);
     }
-    setPreviewing(id);
-    const url = await generateTts(SAMPLE, getGeminiKey());
+    setPreviewing(id || 'auto');
+    const url = await generateTts(SAMPLE, getGeminiKey(), scenarioId);
     setPreviewing('');
     if (url) void new Audio(url).play().catch(() => {});
   }
@@ -80,12 +80,26 @@ export default function VoiceSettings() {
             </span>
           </label>
           <p className="text-[11px] text-gray-400 leading-relaxed mb-2">
-            브라우저 음성보다 훨씬 사람에 가까워요. 무료 한도의 분당 호출 제한이 낮아
-            <b className="text-gray-500"> 카드에 도달할 때 하나씩</b> 만들고,
-            준비가 안 됐으면 브라우저 음성으로 자동 대체해요.
+            <b className="text-gray-500">상황별 자동</b>이면 점원·면접관·친구가 각각 다른
+            목소리와 말투로 말해요. 무료 한도의 분당 호출 제한이 낮아 카드에 도달할 때
+            하나씩 만들고, 준비가 안 됐으면 브라우저 음성으로 자동 대체해요.
           </p>
           {aiOn && (
             <div className="flex flex-wrap gap-1.5">
+              {/* 기본값 — 상황마다 다른 사람이 말한다 */}
+              <button
+                onClick={() => chooseAiVoice('', 'order-cafe')}
+                disabled={previewing !== ''}
+                className={[
+                  'flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium border transition-colors disabled:opacity-50',
+                  aiVoice === ''
+                    ? 'bg-teal-500 text-white border-teal-500'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-teal-300',
+                ].join(' ')}
+              >
+                {previewing === 'auto' && <Loader2 size={10} className="animate-spin" />}
+                상황별 자동
+              </button>
               {GEMINI_VOICES.map(v => (
                 <button
                   key={v.id}
@@ -145,8 +159,7 @@ export default function VoiceSettings() {
       )}
 
       <p className="text-[11px] text-gray-400 mt-3 leading-relaxed border-t border-gray-100 pt-3">
-        상황에 따라 말하는 속도가 조금씩 달라져요 — 면접관은 천천히, 친구는 빠르게.
-        {' '}음높이는 건드리지 않아요(바꾸면 음질이 나빠집니다).
+        아래는 AI 음성을 못 쓸 때 대체로 쓰이는 브라우저 내장 음성이에요.
       </p>
     </div>
   );

@@ -254,7 +254,7 @@ export function speakPrompt(
 
   // Gemini 로 만들어 둔 오디오가 있으면 그걸 쓴다 — 사람 목소리에 훨씬 가깝다.
   // 준비가 안 됐으면 기다리지 않고 바로 아래 브라우저 음성으로 내려간다.
-  const ready = getReadyTts(text);
+  const ready = getReadyTts(text, scenarioId);
   if (ready) {
     try {
       audioEl = new Audio(ready);
