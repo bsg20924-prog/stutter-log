@@ -52,6 +52,11 @@ interface ScenarioSeed {
   label: string;
   /** 고르기 화면에 보여줄 한 줄 설명 */
   hint: string;
+  /**
+   * 누가 누구에게 말하는지. Gemini 에 넘겨 역할이 뒤바뀌는 것을 막는다.
+   * (예: '낯선 사람'은 내가 묻는 상황인데 모델이 나를 답하는 쪽으로 만들곤 했다)
+   */
+  role: string;
   ttsPrompts: string[];
   ambientKey?: AmbientKey;
   /** 도전 단어를 끼워 넣을 틀. {word} 자리에 단어가 들어간다. */
@@ -73,6 +78,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'order-cafe',
     label: '주문 / 카페',
     hint: '카페·식당에서 주문하기',
+    role: '점원이 먼저 말을 걸고, 내가 주문한다.',
     ambientKey: 'cafe',
     ttsPrompts: [
       '주문 도와드릴까요?',
@@ -87,6 +93,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'checkout',
     label: '계산 / 결제',
     hint: '계산대에서 짧게 답하기',
+    role: '계산대 직원이 묻고, 내가 짧게 답한다.',
     ambientKey: 'cafe',
     ttsPrompts: [
       '봉투 필요하세요?',
@@ -101,6 +108,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'introduction',
     label: '자기소개',
     hint: '처음 만난 자리에서 소개하기',
+    role: '진행자나 면접관이 소개를 청하고, 내가 나를 소개한다.',
     ambientKey: 'office',
     ttsPrompts: [
       '자기소개 부탁드립니다.',
@@ -115,6 +123,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'interview',
     label: '면접 / 압박 질문',
     hint: '준비 없이 바로 답해야 하는 상황',
+    role: '면접관이 질문하고, 내가 답한다.',
     ambientKey: 'office',
     ttsPrompts: [
       '그 부분 좀 더 자세히 설명해 주시겠어요?',
@@ -129,6 +138,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'phone-reservation',
     label: '전화 예약',
     hint: '얼굴이 안 보이는 통화',
+    role: '전화를 받은 직원이 먼저 말하고, 내가 용건을 말한다.',
     ambientKey: 'phone',
     ttsPrompts: [
       '여보세요, 무엇을 도와드릴까요?',
@@ -143,6 +153,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'stranger',
     label: '낯선 사람',
     hint: '길에서 모르는 사람에게 말 걸기',
+    role: '내가 먼저 말을 걸었고 상대가 되묻는 참이다. 이제 내가 용건을 묻는다. 상대가 나에게 길을 묻는 상황이 아니다.',
     ttsPrompts: [
       '네? 저 부르셨어요?',
       '무슨 일이시죠?',
@@ -156,6 +167,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'peers',
     label: '친구 / 동기',
     hint: '또래와의 대화 — 끼어들기·농담·차례 뺏기는 상황',
+    role: '친구가 말을 걸고, 내가 답한다. 반말.',
     ttsPrompts: [
       '야, 그래서 어떻게 됐어?',
       '아 뭐라고? 다시 말해봐.',
@@ -170,6 +182,7 @@ const SCENARIO_SEEDS: ScenarioSeed[] = [
     id: 'family',
     label: '가족',
     hint: '가장 편한 상황 — 비교 기준이 된다',
+    role: '가족이 묻고, 내가 답한다. 반말.',
     ttsPrompts: [
       '뭐 먹고 싶어?',
       '오늘 어땠어?',

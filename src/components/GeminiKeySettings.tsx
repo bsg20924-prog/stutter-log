@@ -121,7 +121,7 @@ export default function GeminiKeySettings() {
               type="password"
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder="AIza... 로 시작하는 키를 붙여넣기"
+              placeholder="AI Studio 에서 복사한 키를 붙여넣기"
               autoComplete="off"
               spellCheck={false}
               className="flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none"

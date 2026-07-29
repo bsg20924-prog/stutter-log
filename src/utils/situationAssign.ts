@@ -67,7 +67,7 @@ export async function assignSituations(
     cards.map(c => c.text),
     ALL_IDS.map(id => {
       const s = getScenarioSeed(id)!;
-      return { id: s.id, label: s.label, hint: s.hint, samplePrompt: s.ttsPrompts[0] };
+      return { id: s.id, label: s.label, hint: s.hint, role: s.role, samplePrompt: s.ttsPrompts[0] };
     }),
     signal,
   );
