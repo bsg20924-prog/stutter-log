@@ -10,7 +10,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, Play, Volume2, Sparkles } from 'lucide-react';
 import { Assessment, ASSESSMENTS, UNKNOWN_ASSESSMENT, SituationAssignment } from '../data/soundMap';
-import { RESPONSE_WINDOW_SEC, AMBIENT_META, AmbientKey } from '../data/simulation';
+import { RESPONSE_WINDOW_SEC, AMBIENT_META } from '../data/simulation';
 import {
   primeAudio, speakPrompt, cancelSpeech, SpeakHandle, SpeechOutcome,
 } from '../utils/speech';
@@ -19,13 +19,6 @@ type Phase = 'ready' | 'prompt' | 'countdown' | 'respond' | 'assess';
 
 const COUNTDOWN_FROM = 3;
 const COUNTDOWN_INTERVAL = 800;
-
-// 시나리오 id → 배경 상황 표시 (배경음 키와 같은 매핑)
-const AMBIENT_BY_SCENARIO: Record<string, AmbientKey> = {
-  'order-cafe': 'cafe',
-  'introduction': 'office',
-  'phone-reservation': 'phone',
-};
 
 export default function SituationStep({
   assignment, selected, onSelect,
@@ -111,8 +104,7 @@ export default function SituationStep({
     });
   }
 
-  const ambient = AMBIENT_BY_SCENARIO[assignment.scenarioId];
-  const ambientMeta = ambient ? AMBIENT_META[ambient] : null;
+  const ambientMeta = assignment.ambientKey ? AMBIENT_META[assignment.ambientKey] : null;
 
   return (
     <div className="space-y-3">

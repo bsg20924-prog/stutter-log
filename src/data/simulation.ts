@@ -1,22 +1,21 @@
-// 상황 시뮬레이션(Stage 4) — 시나리오/문장 데이터.
+// 상황 시뮬레이션 — 시나리오/문장 데이터.
 //
 // Stage 1~3(속삭임·목소리·녹음)은 "소리 하나"를 단위로 압력을 올린다.
-// Stage 4 는 단위가 다르다: 상대의 말이 먼저 오고, 그에 대한 "문장"으로 답한다.
-// 여기서만 걸리는 단어는 소리가 어려운 것도, 녹음 압박에 눌린 것도 아니라
+// 4단계는 단위가 다르다: 상대의 말이 먼저 오고, 그에 대한 "문장"으로 답한다.
+// 여기서만 걸리는 소리는 소리가 어려운 것도, 녹음 압박에 눌린 것도 아니라
 // 그 상황 자체에 조건화된 반응이다 — 그래서 처방도 노출/둔감화로 갈라진다.
 //
-// Stage 1~3 의 데이터 구조(SOUND_STEPS, SoundResponse)는 이 파일과 완전히 분리되어 있고
-// 어떤 것도 수정하지 않는다. Stage 4 는 선택 단계이고, 건너뛴 지도도 정상 결과다.
+// 시나리오 구성은 앱이 이미 쓰는 SituationTag(전화·주문/결제·발표/자기소개·
+// 낯선사람·지인/가족·군_상황·급함/압박감)에 맞췄다. 기록 데이터와 같은 축을 쓰면
+// 나중에 "전화에서 자주 막힌다"는 기록과 "전화 상황에서 걸렸다"는 검사 결과를
+// 이어 붙일 수 있다.
 
-// 배경 상황 키.
-// ⚠️ 현재 실제 배경음은 재생하지 않는다 — 저장소에 오디오 에셋이 없고,
-// 합성음으로 카페 소음을 흉내 내면 "진짜 상황"이라는 착각만 준다.
-// 지금은 화면에 상황 맥락을 표시하는 용도로만 쓰고, 나중에 음원을 얹을 자리로 남긴다.
+// 배경 상황 키. 음원은 /public/ambient/ 에 있고 없으면 조용히 무음 처리된다.
 export type AmbientKey = 'cafe' | 'office' | 'phone';
 
 export const AMBIENT_META: Record<AmbientKey, { label: string; emoji: string }> = {
   cafe:   { label: '카페 · 주변이 시끄러움', emoji: '☕' },
-  office: { label: '회의실 · 여러 명이 봄',  emoji: '🏢' },
+  office: { label: '실내 · 여러 명이 봄',   emoji: '🏢' },
   phone:  { label: '통화 · 얼굴이 안 보임',  emoji: '📞' },
 };
 
@@ -32,21 +31,25 @@ export interface SimSentence {
    */
   sourceWords: string[];
   origin: SentenceOrigin;
+  /** 이 문장에 쓸 상대의 말 — 같은 시나리오라도 문장마다 다르게 돌린다 */
+  ttsPrompt: string;
 }
 
 export interface SimScenario {
   id: string;
   label: string;
-  ttsPrompt: string;                 // 상대가 먼저 하는 말
-  responseSentences: SimSentence[];  // 사용자가 답할 문장들
+  /** 상대가 먼저 하는 말의 변형들. 같은 멘트를 반복하면 상황 몰입이 깨진다. */
+  ttsPrompts: string[];
+  responseSentences: SimSentence[];
   ambientKey?: AmbientKey;
 }
 
-// 시나리오 정의 — 문장은 실행 시점에 도전 단어로 채워지므로 여기서는 틀만 잡는다.
 interface ScenarioSeed {
   id: string;
   label: string;
-  ttsPrompt: string;
+  /** 고르기 화면에 보여줄 한 줄 설명 */
+  hint: string;
+  ttsPrompts: string[];
   ambientKey?: AmbientKey;
   /** 도전 단어를 끼워 넣을 틀. {word} 자리에 단어가 들어간다. */
   templates: string[];
@@ -54,66 +57,145 @@ interface ScenarioSeed {
   fallbacks: string[];
 }
 
+// 틀은 '어떤 명사가 와도 문법이 깨지지 않는' 것만 쓴다.
+// 조사(을/를·이/가)가 필요한 틀은 받침 유무로 문법이 깨지므로 절대 쓰지 않는다.
+// 뜻이 어색해지는 건 Gemini 가 해결할 몫이고, 키가 없으면 감수한다.
 const SCENARIO_SEEDS: ScenarioSeed[] = [
   {
     id: 'order-cafe',
     label: '주문 / 카페',
-    ttsPrompt: '주문 도와드릴까요?',
+    hint: '카페·식당에서 주문하기',
     ambientKey: 'cafe',
-    // 틀은 '어떤 명사가 와도 말이 되는' 것만 쓴다.
-    // '{word} 한 잔' 처럼 단위가 붙으면 '삼겹살 한 잔' 같은 문장이 나와서
-    // 사용자가 웃어버리고, 그 순간 상황 압박이 사라져 데이터가 무의미해진다.
-    templates: [
-      '{word} 주세요.',
-      '{word} 하나 주세요.',
-      '{word} 포장해 주세요.',
+    ttsPrompts: [
+      '주문 도와드릴까요?',
+      '어서 오세요, 뭐 드릴까요?',
+      '주문하시겠어요?',
+      '다음 손님 주문 도와드리겠습니다.',
     ],
-    fallbacks: [
-      '아메리카노 한 잔 주세요.',
-      '따뜻한 걸로 주세요.',
-      '포장해 주세요.',
+    templates: ['{word} 주세요.', '{word} 하나 주세요.', '{word} 포장해 주세요.'],
+    fallbacks: ['아메리카노 한 잔 주세요.', '따뜻한 걸로 주세요.', '포장해 주세요.'],
+  },
+  {
+    id: 'checkout',
+    label: '계산 / 결제',
+    hint: '계산대에서 짧게 답하기',
+    ambientKey: 'cafe',
+    ttsPrompts: [
+      '봉투 필요하세요?',
+      '적립 카드 있으세요?',
+      '결제 어떻게 도와드릴까요?',
+      '영수증 드릴까요?',
     ],
+    templates: ['{word} 있어요.', '{word} 빼고 계산해 주세요.', '{word} 추가할게요.'],
+    fallbacks: ['카드로 할게요.', '봉투는 괜찮아요.', '영수증은 안 주셔도 돼요.'],
   },
   {
     id: 'introduction',
     label: '자기소개',
-    ttsPrompt: '자기소개 부탁드립니다.',
+    hint: '처음 만난 자리에서 소개하기',
     ambientKey: 'office',
-    // '안녕하세요, {word}입니다' 는 문법은 맞지만 이름이 아닌 단어가 오면 뜻이 무너진다.
-    // 조사(을/를·이/가)가 필요 없는 틀만 골라 받침 유무와 무관하게 항상 자연스럽게 만든다.
-    templates: [
-      '제 관심사는 {word}입니다.',
-      '{word} 쪽 일을 하고 있습니다.',
-      '{word} 이야기부터 해볼게요.',
+    ttsPrompts: [
+      '자기소개 부탁드립니다.',
+      '간단히 소개해 주시겠어요?',
+      '어떤 분인지 말씀해 주세요.',
+      '돌아가면서 소개할게요. 시작해 주세요.',
     ],
-    fallbacks: [
-      '안녕하세요, 반갑습니다.',
-      '잘 부탁드립니다.',
-      '만나서 반갑습니다.',
+    templates: ['제 관심사는 {word}입니다.', '{word} 이야기부터 해볼게요.', '{word} 쪽 일을 하고 있습니다.'],
+    fallbacks: ['안녕하세요, 반갑습니다.', '잘 부탁드립니다.', '만나서 반갑습니다.'],
+  },
+  {
+    id: 'interview',
+    label: '면접 / 압박 질문',
+    hint: '준비 없이 바로 답해야 하는 상황',
+    ambientKey: 'office',
+    ttsPrompts: [
+      '그 부분 좀 더 자세히 설명해 주시겠어요?',
+      '왜 그렇게 생각하시죠?',
+      '지금 바로 답변해 주세요.',
+      '한 문장으로 정리해 주시겠어요?',
     ],
+    templates: ['{word} 때문입니다.', '{word} 경험이 있습니다.', '{word} 부분을 말씀드리겠습니다.'],
+    fallbacks: ['잠시 생각해 보겠습니다.', '제 생각은 이렇습니다.', '한 가지 예를 들어보겠습니다.'],
   },
   {
     id: 'phone-reservation',
     label: '전화 예약',
-    ttsPrompt: '여보세요, 무엇을 도와드릴까요?',
+    hint: '얼굴이 안 보이는 통화',
     ambientKey: 'phone',
-    templates: [
-      '{word} 예약하려고 하는데요.',
-      '{word} 되나요?',
-      '{word} 문의드리려고 전화했습니다.',
+    ttsPrompts: [
+      '여보세요, 무엇을 도와드릴까요?',
+      '네, 말씀하세요.',
+      '어떤 일로 전화 주셨어요?',
+      '여보세요? 잘 안 들리는데요.',
     ],
-    fallbacks: [
-      '예약하려고 하는데요.',
-      '내일 저녁 가능한가요?',
-      '두 명이요.',
+    templates: ['{word} 예약하려고 하는데요.', '{word} 되나요?', '{word} 문의드리려고 전화했습니다.'],
+    fallbacks: ['예약하려고 하는데요.', '내일 저녁 가능한가요?', '두 명이요.'],
+  },
+  {
+    id: 'stranger',
+    label: '낯선 사람',
+    hint: '길에서 모르는 사람에게 말 걸기',
+    ttsPrompts: [
+      '네? 저 부르셨어요?',
+      '무슨 일이시죠?',
+      '네, 말씀하세요.',
+      '어떤 거 찾으세요?',
     ],
+    templates: ['{word} 어디인지 아세요?', '{word} 찾고 있는데요.', '{word} 여쭤봐도 될까요?'],
+    fallbacks: ['혹시 길 좀 여쭤봐도 될까요?', '이 근처에 역이 어디예요?', '실례합니다, 잠시만요.'],
+  },
+  {
+    id: 'military',
+    label: '군 상황',
+    hint: '관등성명·보고처럼 형식이 정해진 발화',
+    ttsPrompts: [
+      '관등성명 대라.',
+      '보고해.',
+      '지금 상황 설명해 봐.',
+      '다시 한번 크게.',
+    ],
+    templates: ['{word} 확인했습니다.', '{word} 이상 없습니다.', '{word} 보고드리겠습니다.'],
+    fallbacks: ['이상 없습니다.', '확인했습니다.', '알겠습니다.'],
+  },
+  {
+    id: 'family',
+    label: '지인 / 가족',
+    hint: '편한 사람과의 대화 — 비교 기준이 된다',
+    ttsPrompts: [
+      '뭐 먹고 싶어?',
+      '오늘 어땠어?',
+      '그래서 어떻게 됐는데?',
+      '무슨 얘기 하려고 했지?',
+    ],
+    templates: ['{word} 먹고 싶어.', '{word} 얘기 하려고 했어.', '{word} 어땠는지 알아?'],
+    fallbacks: ['오늘은 좀 피곤했어.', '별일 없었어.', '나중에 얘기해 줄게.'],
   },
 ];
 
+/** 고르기 화면용 메타 */
+export const SCENARIO_LIST = SCENARIO_SEEDS.map(s => ({
+  id: s.id,
+  label: s.label,
+  hint: s.hint,
+  ambientKey: s.ambientKey,
+}));
+
 export const SCENARIO_COUNT = SCENARIO_SEEDS.length;
+
+/** 단독 실행의 기본 선택 — 전부 돌리면 27문장이라 너무 길다 */
+export const DEFAULT_SCENARIO_IDS = ['order-cafe', 'introduction', 'phone-reservation'];
 
 /** 시나리오 하나당 만들 문장 수 */
 const SENTENCES_PER_SCENARIO = 3;
+
+export function getScenarioSeed(id: string): ScenarioSeed | undefined {
+  return SCENARIO_SEEDS.find(s => s.id === id);
+}
+
+/** 같은 멘트가 연달아 나오지 않도록 인덱스로 돌려 쓴다. */
+export function pickPrompt(prompts: string[], index: number): string {
+  return prompts[index % prompts.length] ?? prompts[0];
+}
 
 function makeSentence(
   scenarioId: string,
@@ -121,63 +203,63 @@ function makeSentence(
   text: string,
   sourceWords: string[],
   origin: SentenceOrigin,
+  ttsPrompt: string,
 ): SimSentence {
-  return { id: `${scenarioId}-${origin}-${seq}`, text, sourceWords, origin };
+  return { id: `${scenarioId}-${origin}-${seq}`, text, sourceWords, origin, ttsPrompt };
 }
 
 /**
  * 도전 단어를 시나리오 틀에 끼워 넣어 응답 문장을 만든다.
  *
- * 도전 단어가 모자라면 기본 문장으로 채운다 — 시나리오마다 문장 수를 맞춰야
- * "3개 중 2개에서 걸림" 같은 비교가 성립한다.
+ * @param scenarioIds 돌릴 시나리오. 생략하면 기본 3개.
  */
 export function buildScenarios(
   challengeWords: string[],
   customSentences: string[] = [],
+  scenarioIds: string[] = DEFAULT_SCENARIO_IDS,
 ): SimScenario[] {
-  // 단어가 시나리오마다 똑같은 순서로 반복되지 않게 시나리오별로 시작 위치를 어긋나게 한다.
   const words = challengeWords.filter(w => w.trim().length > 0);
+  const seeds = scenarioIds
+    .map(getScenarioSeed)
+    .filter((s): s is ScenarioSeed => Boolean(s));
 
-  return SCENARIO_SEEDS.map((seed, scenarioIdx) => {
+  return seeds.map((seed, scenarioIdx) => {
     const sentences: SimSentence[] = [];
 
     for (let i = 0; i < SENTENCES_PER_SCENARIO; i++) {
-      const word = words.length > 0
-        ? words[(scenarioIdx + i) % words.length]
-        : undefined;
+      // 단어가 시나리오마다 똑같은 순서로 반복되지 않게 시작 위치를 어긋나게 한다.
+      const word = words.length > 0 ? words[(scenarioIdx + i) % words.length] : undefined;
+      const prompt = pickPrompt(seed.ttsPrompts, i);
 
       if (word !== undefined && i < seed.templates.length) {
         sentences.push(makeSentence(
-          seed.id, i,
-          seed.templates[i].replace('{word}', word),
-          [word],
-          'challenge',
+          seed.id, i, seed.templates[i].replace('{word}', word), [word], 'challenge', prompt,
         ));
       } else {
         sentences.push(makeSentence(
-          seed.id, i,
-          seed.fallbacks[i % seed.fallbacks.length],
-          [],
-          'template',
+          seed.id, i, seed.fallbacks[i % seed.fallbacks.length], [], 'template', prompt,
         ));
       }
     }
 
-    // 직접 입력한 문장은 모든 시나리오 뒤에 붙이지 않고 첫 시나리오에만 붙인다.
-    // 세 번 반복시키면 같은 문장을 세 번 말하게 되어 평가가 오염된다.
+    // 직접 입력한 문장은 첫 시나리오에만 붙인다.
+    // 모든 시나리오에 반복시키면 같은 문장을 여러 번 말하게 되어 평가가 오염된다.
     if (scenarioIdx === 0) {
       customSentences
         .map(s => s.trim())
         .filter(Boolean)
         .forEach((text, i) => {
-          sentences.push(makeSentence(seed.id, i, text, [], 'custom'));
+          sentences.push(makeSentence(
+            seed.id, i, text, [], 'custom',
+            pickPrompt(seed.ttsPrompts, SENTENCES_PER_SCENARIO + i),
+          ));
         });
     }
 
     return {
       id: seed.id,
       label: seed.label,
-      ttsPrompt: seed.ttsPrompt,
+      ttsPrompts: seed.ttsPrompts,
       ambientKey: seed.ambientKey,
       responseSentences: sentences,
     };

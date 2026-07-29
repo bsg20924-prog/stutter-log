@@ -158,6 +158,8 @@ export interface SituationAssignment {
   sentence: string;
   /** 문장을 어떻게 만들었는지 — Gemini 가 만든 문장과 템플릿 문장의 품질 차이를 나중에 구분하기 위해 */
   source: 'gemini' | 'template';
+  /** 배경음/상황 표시용. 시나리오 데이터에서 함께 넘어온다(중복 매핑을 두지 않기 위해). */
+  ambientKey?: 'cafe' | 'office' | 'phone';
 }
 
 // 카드 하나에 대한 응답 (단계별)

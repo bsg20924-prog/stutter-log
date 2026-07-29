@@ -144,31 +144,40 @@ function extractText(data: InteractionResponse): string {
 export interface SentenceRequestScenario {
   id: string;
   label: string;
-  ttsPrompt: string;
+  hint: string;
+  /** 어떤 톤의 멘트인지 감을 주기 위한 예시 (이걸 그대로 쓰지는 말라고 지시한다) */
+  samplePrompt: string;
 }
 
 export interface GeneratedSentence {
   word: string;
   scenarioId: string;
+  /** 상대가 먼저 하는 말 */
+  prompt: string;
+  /** 사용자가 답할 문장 */
   text: string;
 }
 
 const SYSTEM_INSTRUCTION = [
-  '너는 한국어 말더듬 연습 앱의 문장 생성기다.',
-  '사용자가 실제 상황에서 말할 법한 자연스러운 한국어 문장을 만든다.',
+  '너는 한국어 말더듬 연습 앱의 상황 생성기다.',
+  '단어 하나마다 "상대가 하는 말"과 "사용자가 답할 문장"을 짝으로 만든다.',
   '',
   '규칙:',
-  '1. 주어진 단어를 문장에 **그대로** 포함시킨다. 형태를 바꾸거나 다른 말로 바꾸지 않는다.',
-  '2. 주어진 상황 중 그 단어가 가장 자연스럽게 들어갈 상황 하나를 고른다.',
-  '3. 문장은 짧게. 한 문장, 25자 이내.',
-  '4. 조사를 정확히 쓴다(받침 유무에 따라 은/는, 이/가, 을/를).',
-  '5. 어색하면 억지로 끼워 넣지 말고, 그 단어가 주인공이 되는 자연스러운 발화를 만든다.',
-  '6. 영어 단어는 한국어 문장 안에 그대로 둔다.',
+  '1. 주어진 단어를 답변 문장에 **그대로** 포함시킨다. 형태를 바꾸거나 다른 말로 바꾸지 않는다.',
+  '2. 주어진 상황 목록 중 그 단어가 가장 자연스럽게 들어갈 상황 하나를 고른다(id 그대로).',
+  '3. prompt 는 그 상황에서 **상대가 먼저 건네는 말**이다. 예시를 복사하지 말고 매번 다르게 쓴다.',
+  '   같은 상황이 여러 번 나와도 멘트가 겹치지 않게 표현을 바꾼다.',
+  '4. prompt 와 text 모두 짧게. 각각 한 문장, 25자 이내.',
+  '5. prompt 는 답변 문장과 자연스럽게 이어져야 한다(질문에 답이 되게).',
+  '6. 조사를 정확히 쓴다(받침 유무에 따라 은/는, 이/가, 을/를).',
+  '7. 어색하면 억지로 끼워 넣지 말고, 그 단어가 주인공이 되는 자연스러운 대화를 만든다.',
+  '8. 영어 단어는 한국어 문장 안에 그대로 둔다.',
+  '9. 존댓말/반말은 상황에 맞춘다(가족·지인은 반말, 나머지는 존댓말).',
   '',
-  '나쁜 예: "삼겹살 한 잔 주세요" (단위가 안 맞음)',
-  '나쁜 예: "안녕하세요, 오리입니다" (뜻이 무너짐)',
-  '좋은 예: "삼겹살 2인분 주세요"',
-  '좋은 예: "오리 보러 가고 싶어요"',
+  '나쁜 예: text="삼겹살 한 잔 주세요" (단위가 안 맞음)',
+  '나쁜 예: text="안녕하세요, 오리입니다" (뜻이 무너짐)',
+  '좋은 예: prompt="주문하시겠어요?" / text="삼겹살 2인분 주세요"',
+  '좋은 예: prompt="뭐 보러 갈까?" / text="오리 보러 가고 싶어"',
 ].join('\n');
 
 const RESPONSE_SCHEMA = {
@@ -181,9 +190,10 @@ const RESPONSE_SCHEMA = {
         properties: {
           word: { type: 'string' },
           scenarioId: { type: 'string' },
+          prompt: { type: 'string' },
           text: { type: 'string' },
         },
-        required: ['word', 'scenarioId', 'text'],
+        required: ['word', 'scenarioId', 'prompt', 'text'],
       },
     },
   },
@@ -205,15 +215,19 @@ export async function generateSituationSentences(
   if (!key || words.length === 0 || scenarios.length === 0) return null;
 
   const scenarioList = scenarios
-    .map(s => `- ${s.id} (${s.label}): 상대가 "${s.ttsPrompt}" 라고 말한 직후 상황`)
+    .map(s => `- ${s.id} (${s.label}): ${s.hint}. 멘트 예시(그대로 쓰지 말 것): "${s.samplePrompt}"`)
     .join('\n');
 
   const input = [
     '상황 목록:',
     scenarioList,
     '',
-    '아래 단어 각각에 대해, 위 상황 중 하나를 골라 그 단어가 들어간 자연스러운 한국어 문장을 하나씩 만들어라.',
-    'scenarioId 는 반드시 위 목록의 id 중 하나여야 한다.',
+    '아래 단어 각각에 대해 다음을 만들어라:',
+    '  scenarioId — 위 목록의 id 중 그 단어가 가장 자연스러운 상황',
+    '  prompt     — 그 상황에서 상대가 먼저 하는 말 (매번 다르게)',
+    '  text       — 그 말에 대한 답변. 주어진 단어를 그대로 포함할 것',
+    '',
+    `단어 ${words.length}개 전부에 대해 빠짐없이 만들어라.`,
     '',
     '단어 목록:',
     ...words.map(w => `- ${w}`),
@@ -267,12 +281,14 @@ export async function generateSituationSentences(
       const word = String(r.word ?? '').trim();
       const scenarioId = String(r.scenarioId ?? '').trim();
       const sentence = String(r.text ?? '').trim();
+      const prompt = String(r.prompt ?? '').trim();
       if (!word || !sentence) continue;
       if (!validIds.has(scenarioId)) continue;
       if (!wanted.has(word.toLowerCase())) continue;
       // 단어가 실제로 문장 안에 들어 있어야 한다 — 이게 이 단계의 측정 대상이다.
       if (!sentence.toLowerCase().includes(word.toLowerCase())) continue;
-      out.push({ word, scenarioId, text: sentence });
+      // 멘트는 없거나 지나치게 길면 버린다(호출부가 고정 멘트로 대체한다).
+      out.push({ word, scenarioId, prompt: prompt.length <= 60 ? prompt : '', text: sentence });
     }
     return out.length > 0 ? out : null;
   } catch {

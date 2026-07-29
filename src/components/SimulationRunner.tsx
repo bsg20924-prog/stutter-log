@@ -11,7 +11,8 @@ import {
   MessageSquare, Volume2, VolumeX, Play, ChevronRight, Plus, X, Mic, Smartphone,
 } from 'lucide-react';
 import {
-  SimScenario, SimSentence, AmbientKey, AMBIENT_META, RESPONSE_WINDOW_SEC, buildScenarios,
+  SimScenario, SimSentence, AmbientKey, AMBIENT_META, RESPONSE_WINDOW_SEC,
+  buildScenarios, SCENARIO_LIST, DEFAULT_SCENARIO_IDS,
 } from '../data/simulation';
 import { Assessment, ASSESSMENTS, UNKNOWN_ASSESSMENT } from '../data/soundMap';
 import { SimSentenceResponse } from '../utils/simulationResult';
@@ -94,6 +95,8 @@ function SimulationIntro({
   // 그 단어가 이름인지 메뉴인지는 사용자만 안다 — 자동으로는 절대 못 가른다.
   // 어색한 문장을 그대로 말하게 하면 웃어버려서 상황 압박이 사라지고 데이터가 망가진다.
   const [removed, setRemoved] = useState<Set<string>>(new Set());
+  // 어떤 상황을 돌릴지. 8개 전부면 27문장이라 '빠른 연습'이 되지 않는다.
+  const [scenarioIds, setScenarioIds] = useState<string[]>(DEFAULT_SCENARIO_IDS);
 
   // 목소리 목록은 비동기로 채워진다 — 미리 데워 두고 준비되면 안내 문구를 바꾼다.
   useEffect(() => warmUpVoices(() => setKoVoice(hasKoreanVoice())), []);
@@ -111,9 +114,15 @@ function SimulationIntro({
   const canRecord = isSimRecordingSupported();
 
   const preview = useMemo(
-    () => buildScenarios(challengeWords, custom),
-    [challengeWords, custom],
+    () => buildScenarios(challengeWords, custom, scenarioIds),
+    [challengeWords, custom, scenarioIds],
   );
+
+  function toggleScenario(id: string) {
+    setScenarioIds(prev => prev.includes(id)
+      ? prev.filter(x => x !== id)
+      : [...prev, id]);
+  }
 
   // 실제로 진행할 시나리오 — 뺀 문장을 제거하고, 문장이 하나도 없는 상황은 통째로 뺀다.
   const finalScenarios = useMemo(
@@ -188,6 +197,38 @@ function SimulationIntro({
               : '이 기기에는 한국어 음성이 없어서, 상대의 말은 말풍선과 짧은 알림음으로 표시돼요.'}
           </span>
         </p>
+      </div>
+
+      {/* 어떤 상황을 연습할지 고르기 */}
+      <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+        <p className="text-sm font-semibold text-gray-700 mb-1">연습할 상황</p>
+        <p className="text-xs text-gray-400 mb-3">
+          고른 상황마다 문장 3개씩 나와요. 많이 고르면 그만큼 길어져요.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {SCENARIO_LIST.map(s => {
+            const on = scenarioIds.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => toggleScenario(s.id)}
+                title={s.hint}
+                className={[
+                  'rounded-full px-3 py-1.5 text-xs font-medium border transition-colors',
+                  on
+                    ? 'bg-teal-500 text-white border-teal-500'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-teal-300',
+                ].join(' ')}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        {scenarioIds.length === 0 && (
+          <p className="text-[11px] text-amber-600 mt-2">상황을 하나 이상 골라 주세요.</p>
+        )}
       </div>
 
       {/* 말할 문장 — 자동 생성분을 미리 보여주고 어색한 건 빼게 한다 */}
@@ -483,7 +524,8 @@ function ScenarioPlayer({
     setPhase('prompt');
     setOutcome(null);
 
-    speakRef.current = speakPrompt(scenario.ttsPrompt, result => {   // (2) 곧바로 발화
+    // 멘트는 문장마다 다르다 — 같은 상황이라도 매번 같은 말을 들으면 몰입이 깨진다.
+    speakRef.current = speakPrompt(sentence.ttsPrompt, result => {   // (2) 곧바로 발화
       if (genRef.current !== gen) return;
       setOutcome(result);
       startCountdown(gen);        // (3) 재생이 끝나면 즉시 3-2-1
@@ -596,7 +638,7 @@ function ScenarioPlayer({
       <div className="mb-3">
         <div className="inline-flex items-start gap-2 max-w-full bg-white rounded-2xl rounded-tl-sm shadow-[0_8px_30px_rgb(0,0,0,0.05)] px-4 py-3">
           <MessageSquare size={15} className="shrink-0 text-gray-300 mt-0.5" />
-          <p className="text-sm text-gray-700 break-keep">{scenario.ttsPrompt}</p>
+          <p className="text-sm text-gray-700 break-keep">{sentence.ttsPrompt}</p>
         </div>
         {phase === 'prompt' && (
           <p className="text-[11px] text-teal-500 mt-1.5 px-1">
