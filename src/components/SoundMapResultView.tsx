@@ -19,7 +19,8 @@ import { summarizeSimulation } from '../utils/simulationResult';
 import { SOUND_GROUPS } from '../data/soundMap';
 import {
   Prescription, SimulationPrescription,
-  BLOCKAGE_META, buildPrescriptions, buildSimulationPrescriptions,
+  BLOCKAGE_META, buildPrescriptions,
+  buildSimulationPrescriptions, buildSituationPrescriptionsFromCards,
 } from '../utils/soundMapPrescription';
 import { ZONES } from '../utils/phonetics';
 import { extractPhoneme } from '../utils/phoneme';
@@ -45,10 +46,13 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
   const overpredictedCards = result.cards.filter(c => c.fearGap === 'over');
   // 저장된 카드에서 매번 파생 — 예전 지도도 처방을 받을 수 있다.
   const prescriptions = buildPrescriptions(result.cards);
-  // 상황에서만 걸린 것은 원인이 달라 따로 묶는다 (Stage 4 를 안 했으면 빈 배열).
-  const simPrescriptions = buildSimulationPrescriptions(
-    result.simulation, result.simulationOnlyWords,
-  );
+  // 상황에서만 걸린 것은 원인이 달라 따로 묶는다.
+  // 우선순위: 카드 4단계 데이터 → 없으면 예전 방식(별도 시뮬레이션)으로 폴백.
+  // 예전에 저장된 지도도 계속 처방을 받을 수 있어야 한다.
+  const fromCards = buildSituationPrescriptionsFromCards(result.cards);
+  const simPrescriptions = fromCards.length > 0
+    ? fromCards
+    : buildSimulationPrescriptions(result.simulation, result.simulationOnlyWords);
   // 연습 모달에 넘길 단어: 처방 대상 단어가 없으면 걸린 소리 전체
   const practiceWords = prescriptions.flatMap(p => p.words);
 

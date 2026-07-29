@@ -2,15 +2,28 @@
 // 지도가 없으면 안내 + 시작 CTA, 있으면 최근 지도 결과를 보여준다.
 
 import { useState } from 'react';
-import { RefreshCw, Map as MapIcon } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+import { ko } from 'date-fns/locale';
+import { RefreshCw, Map as MapIcon, Drama, ChevronRight, Clock } from 'lucide-react';
 import {
   useLatestSoundMap, saveSoundMapResult, clearLocalSoundMaps,
 } from '../hooks/useSoundMaps';
+import { useSimulationRuns } from '../hooks/useSimulations';
 import { DEFAULT_CARD_COUNT } from '../data/soundMap';
+import { SCENARIO_COUNT } from '../data/simulation';
+import { summarizeStandalone } from '../utils/simulationStandalone';
 import SoundMapResultView from './SoundMapResultView';
+import SimulationResultView from './SimulationResultView';
 
-export default function SoundMapPanel({ onStart }: { onStart: () => void }) {
+export default function SoundMapPanel({
+  onStart, onStartSimulation,
+}: {
+  onStart: () => void;
+  onStartSimulation: () => void;
+}) {
   const { latest, loading } = useLatestSoundMap();
+  const { runs } = useSimulationRuns();
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -24,26 +37,66 @@ export default function SoundMapPanel({ onStart }: { onStart: () => void }) {
     <div className="space-y-4">
       {import.meta.env.DEV && <DevSeedBar hasMap={!!latest} />}
 
-      {!latest ? (
-        <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 text-center">
-          <p className="text-3xl mb-3">🗺️</p>
-          <h2 className="text-base font-bold text-gray-800 mb-2">소리 지도 만들기</h2>
-          <p className="text-xs text-gray-500 leading-relaxed mb-5">
-            {DEFAULT_CARD_COUNT}개의 소리를 <b>속삭임 → 목소리 → 녹음</b> 3단계로 말하면서<br />
-            <b>어느 압력에서</b> 걸리는지, 그리고 <b>왜</b> 걸리는지(공기·후두·조음)를<br />
-            함께 분석해 맞춤 전략을 처방해 드려요.
-          </p>
-          <button
-            onClick={onStart}
-            className="inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold bg-teal-500 text-white hover:bg-teal-600 transition-colors"
-          >
-            <MapIcon size={18} />
-            소리 지도 시작하기
-          </button>
+      {/* ── 무엇을 할지 고르기 ── */}
+      {/* 두 경로를 나란히 둔다. 시뮬레이션만 하려고 카드 28장을 다 도는 건 말이 안 된다. */}
+      <div className="space-y-2">
+        <ModeCard
+          icon={<MapIcon size={20} />}
+          title={latest ? '소리 지도 다시 만들기' : '소리 지도 만들기'}
+          desc={`소리 ${DEFAULT_CARD_COUNT}개를 속삭임 → 목소리 → 녹음 → 실제 상황으로 재요.`}
+          note="어느 압력에서 왜 걸리는지 원인까지 가려내요. 20분 안팎."
+          onClick={onStart}
+          primary
+        />
+        <ModeCard
+          icon={<Drama size={20} />}
+          title="상황 시뮬레이션만 하기"
+          desc={`상황 ${SCENARIO_COUNT}개에서 문장으로 답해요. 3~5분.`}
+          note={latest
+            ? '최근 소리 지도에 비춰 상황 탓인지 소리 탓인지 가려드려요.'
+            : '지도가 없어도 할 수 있어요. 다만 원인 분석은 지도가 있어야 해요.'}
+          onClick={onStartSimulation}
+        />
+      </div>
+
+      {/* ── 최근 시뮬레이션 이력 ── */}
+      {runs.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-600 px-1 mb-2">최근 시뮬레이션</h2>
+          <div className="space-y-2">
+            {runs.slice(0, 5).map(run => (
+              <div key={run.id} className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+                <button
+                  onClick={() => setOpenRunId(openRunId === run.id ? null : run.id)}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock size={13} className="shrink-0 text-gray-300" />
+                    <span className="text-xs text-gray-400">
+                      {format(parseISO(run.createdAt), 'M월 d일 HH:mm', { locale: ko })}
+                    </span>
+                    <ChevronRight
+                      size={16}
+                      className={`ml-auto shrink-0 text-gray-300 transition-transform ${openRunId === run.id ? 'rotate-90' : ''}`}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed mt-1">{summarizeStandalone(run)}</p>
+                </button>
+                {openRunId === run.id && (
+                  <div className="px-3 pb-3 pt-1 bg-gray-50/60">
+                    <SimulationResultView run={run} onStartSoundMap={onStart} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      ) : (
+      )}
+
+      {/* ── 최근 소리 지도 ── */}
+      {latest && (
         <>
-          <div className="flex items-center justify-between px-1">
+          <div className="flex items-center justify-between px-1 pt-2">
             <h2 className="text-sm font-semibold text-gray-600">최근 소리 지도</h2>
             <button
               onClick={onStart}
@@ -57,6 +110,43 @@ export default function SoundMapPanel({ onStart }: { onStart: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+// 시작 경로 카드 — 소요 시간을 앞에 밝혀 고르기 쉽게 한다.
+function ModeCard({
+  icon, title, desc, note, onClick, primary,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  note: string;
+  onClick: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'w-full flex items-start gap-3 rounded-2xl px-4 py-3.5 text-left transition-all',
+        primary
+          ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white shadow-[0_8px_30px_rgba(13,148,136,0.25)] hover:from-teal-600 hover:to-teal-700'
+          : 'bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:bg-gray-50',
+      ].join(' ')}
+    >
+      <span className={[
+        'flex items-center justify-center w-10 h-10 rounded-xl shrink-0',
+        primary ? 'bg-white/20' : 'bg-teal-50 text-teal-600',
+      ].join(' ')}>
+        {icon}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className={`block text-sm font-bold ${primary ? '' : 'text-gray-800'}`}>{title}</span>
+        <span className={`block text-xs mt-0.5 ${primary ? 'text-teal-50/90' : 'text-gray-500'}`}>{desc}</span>
+        <span className={`block text-[11px] mt-1 leading-relaxed ${primary ? 'text-teal-50/70' : 'text-gray-400'}`}>{note}</span>
+      </span>
+      <ChevronRight size={20} className={`shrink-0 mt-2 ${primary ? 'opacity-80' : 'text-gray-300'}`} />
+    </button>
   );
 }
 

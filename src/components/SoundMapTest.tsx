@@ -1,28 +1,26 @@
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { X, ChevronLeft, Plus, Map as MapIcon } from 'lucide-react';
+import { X, ChevronLeft, Plus, Map as MapIcon, Sparkles } from 'lucide-react';
 import {
-  SoundCard, SoundResponse, Assessment, SoundStepId, RecordingMode,
+  SoundCard, SoundResponse, Assessment, SoundStepId, RecordingMode, SituationAssignment,
   SOUND_STEPS, ASSESSMENTS, UNKNOWN_ASSESSMENT, KIND_LABEL,
   buildDefaultCards, makeCustomCard, SUGGESTED_CUSTOM_WORDS,
 } from '../data/soundMap';
+import { assignSituations } from '../utils/situationAssign';
+import { hasGeminiKey } from '../utils/gemini';
+import SituationStep from './SituationStep';
 import { useMicPressure, MicPressure } from '../hooks/useMicPressure';
 import {
   SoundMapResult, computeSoundMapResult, isSoundMapComplete,
 } from '../utils/soundMapResult';
-import {
-  SimulationResult, SimSentenceResponse, buildSimulationResult,
-} from '../utils/simulationResult';
-import { SimScenario } from '../data/simulation';
 import { saveSoundMapResult } from '../hooks/useSoundMaps';
-import { attachSoundMapId, deleteClipsBySession } from '../utils/recordingStore';
 import { useLogStore } from '../hooks/useLogStore';
 import { getActiveChallengeWords } from '../utils/challenge';
 import RecordingPressurePanel from './RecordingPressurePanel';
-import SimulationRunner from './SimulationRunner';
+import GeminiKeySettings from './GeminiKeySettings';
 import SoundMapResultView from './SoundMapResultView';
 
-// 'simulation'(Stage 4)은 선택 단계다 — 건너뛰면 Stage 4 도입 전과 똑같은 결과가 나온다.
-type Stage = 'intro' | 'card' | 'simulation' | 'done';
+// 상황(4단계)은 카드마다 사다리 안에서 겪는다 — 별도 단계가 아니다.
+type Stage = 'intro' | 'card' | 'done';
 
 export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [stage, setStage] = useState<Stage>('intro');
@@ -32,9 +30,10 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [responses, setResponses] = useState<Record<string, SoundResponse>>({});
   const [confirmExit, setConfirmExit] = useState(false);
   const [countdownOn, setCountdownOn] = useState(true);
-  const [simulation, setSimulation] = useState<SimulationResult | undefined>();
-  // 녹음은 소리 지도가 저장되기 전에 만들어진다 — 저장 후 이 키로 지도 id 를 붙인다.
-  const [recordingSessionId, setRecordingSessionId] = useState<string | undefined>();
+  // 카드별 4단계 상황 배정 (Gemini 우선, 실패하면 템플릿)
+  const [situations, setSituations] = useState<Record<string, SituationAssignment>>({});
+  const [assigning, setAssigning] = useState(false);
+  const [geminiFailed, setGeminiFailed] = useState(false);
 
   // Stage 4 문장 재료 — 아직 극복하지 못한 도전 단어를 그대로 쓴다.
   const { entries } = useLogStore();
@@ -57,18 +56,29 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
     if (grantedOnce) micStart();
   }, [onRecordingStep, confirmExit, cardIndex, grantedOnce, micStart, micStop]);
 
-  function start(customWords: string[], countdown: boolean) {
+  async function start(customWords: string[], countdown: boolean) {
     const custom = customWords.map((w, i) => makeCustomCard(w, i + 1));
+    const allCards = [...buildDefaultCards(), ...custom];
     setCountdownOn(countdown);
-    setCards([...buildDefaultCards(), ...custom]);
+    setCards(allCards);
     setCardIndex(0);
     setStep(0);
     setResponses({});
-    setSimulation(undefined);
     setStage('card');
+
+    // 상황 문장은 시작 시 한 번에 만든다 — 카드마다 호출하면 매번 멈춘다.
+    // 실패해도 템플릿 문장이 이미 채워져 돌아오므로 검사는 그대로 진행된다.
+    setAssigning(hasGeminiKey());
+    try {
+      const result = await assignSituations(allCards);
+      setSituations(result.assignments);
+      setGeminiFailed(result.geminiFailed);
+    } finally {
+      setAssigning(false);
+    }
   }
 
-  // 다음 단계(또는 다음 카드/상황 시뮬레이션)로 진행
+  // 다음 단계(또는 다음 카드/완료)로 진행
   function advance() {
     if (step < SOUND_STEPS.length - 1) {
       setStep(step + 1);
@@ -76,22 +86,8 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
       setCardIndex(cardIndex + 1);
       setStep(0);
     } else {
-      // 압력 사다리를 마치면 Stage 4 를 제안한다. 건너뛰면 바로 결과로 간다.
-      setStage('simulation');
+      setStage('done');
     }
-  }
-
-  function finishSimulation(
-    scenarios: SimScenario[],
-    simResponses: Record<string, SimSentenceResponse>,
-    sessionId?: string,
-  ) {
-    setRecordingSessionId(sessionId);
-    const result = buildSimulationResult(scenarios, simResponses);
-    // 한 문장도 평가하지 않았으면 Stage 4 를 안 한 것으로 취급한다 —
-    // 빈 결과를 저장하면 "상황에서 걸린 게 없음"과 "해보지 않음"이 구분되지 않는다.
-    setSimulation(result.sentences.length > 0 ? result : undefined);
-    setStage('done');
   }
 
   function back() {
@@ -112,19 +108,27 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
     // 실제 녹음이 돌던 중의 응답인지 표시만 남긴다 (오디오는 저장하지 않음).
     // 업데이터 안에서 ref 를 읽으면 실행 시점이 밀릴 수 있어 지금 값을 캡처해 둔다.
     const mode: RecordingMode = didRecordRef.current ? 'mic' : 'manual';
+    const situation = situations[card.id];
     setResponses(prev => ({
       ...prev,
       [card.id]: {
         ...prev[card.id],
         [stepId]: value,
         ...(stepId === 'recording' ? { recordingMode: mode } : {}),
+        // 어떤 상황/문장에서 나온 응답인지 함께 남긴다 — 처방에 맥락을 붙이는 데 쓴다.
+        ...(stepId === 'situation' && situation ? {
+          situationScenarioId: situation.scenarioId,
+          situationScenarioLabel: situation.scenarioLabel,
+          situationSentence: situation.sentence,
+          situationSource: situation.source,
+        } : {}),
       },
     }));
     advance();
   }
 
   function requestExit() {
-    if (stage === 'card' || stage === 'simulation') setConfirmExit(true);
+    if (stage === 'card') setConfirmExit(true);
     else onClose();
   }
 
@@ -157,6 +161,9 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
               total={cards.length}
               step={step}
               response={responses[card.id] ?? {}}
+              situation={situations[card.id]}
+              assigning={assigning}
+              geminiFailed={geminiFailed}
               mic={mic}
               onFear={setFear}
               onAssess={setAssessment}
@@ -164,22 +171,8 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
             />
           )}
 
-          {stage === 'simulation' && (
-            <SimulationRunner
-              challengeWords={challengeWords}
-              onFinish={finishSimulation}
-              onSkip={() => setStage('done')}
-            />
-          )}
-
           {stage === 'done' && (
-            <DoneScreen
-              cards={cards}
-              responses={responses}
-              simulation={simulation}
-              recordingSessionId={recordingSessionId}
-              onClose={onClose}
-            />
+            <DoneScreen cards={cards} responses={responses} onClose={onClose} />
           )}
         </div>
       </main>
@@ -244,7 +237,7 @@ function IntroScreen({
         <p className="text-3xl mb-2">🗺️</p>
         <h2 className="text-lg font-bold text-gray-800">소리 지도 만들기</h2>
         <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-          같은 소리를 <b>속삭임 → 목소리 → 녹음 압박</b> 3단계로 말하며<br />
+          같은 소리를 <b>속삭임 → 목소리 → 녹음 → 실제 상황</b> 4단계로 말하며<br />
           어느 압력에서 막히는지 나만의 지도를 만들어요.
         </p>
       </div>
@@ -320,6 +313,8 @@ function IntroScreen({
         )}
       </div>
 
+      <GeminiKeySettings />
+
       {/* 녹음 압박 설정 */}
       <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
         <div className="flex items-center gap-3">
@@ -368,13 +363,17 @@ function IntroScreen({
 
 // ── 카드 진행: 4단계 ──────────────────────────────────────
 function CardRunner({
-  card, cardIndex, total, step, response, mic, onFear, onAssess, onBack,
+  card, cardIndex, total, step, response, situation, assigning, geminiFailed,
+  mic, onFear, onAssess, onBack,
 }: {
   card: SoundCard;
   cardIndex: number;
   total: number;
   step: number;
   response: SoundResponse;
+  situation?: SituationAssignment;
+  assigning: boolean;
+  geminiFailed: boolean;
   mic: MicPressure;
   onFear: (n: number) => void;
   onAssess: (stepId: SoundStepId, value: Assessment) => void;
@@ -421,15 +420,55 @@ function CardRunner({
         })}
       </div>
 
-      {/* 소리 카드 */}
-      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] px-6 py-10 text-center mb-5">
+      {/* 소리 카드 — 4단계에서는 문장이 주인공이라 작게 줄인다 */}
+      <div className={[
+        'bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] text-center mb-5',
+        stepDef.id === 'situation' ? 'px-6 py-5' : 'px-6 py-10',
+      ].join(' ')}>
         <p className="text-xs font-medium text-teal-500 mb-3">{stepDef.title}</p>
-        <p className="text-6xl font-bold text-gray-800 tracking-tight break-keep">{card.text}</p>
+        <p className={[
+          'font-bold text-gray-800 tracking-tight break-keep',
+          stepDef.id === 'situation' ? 'text-3xl' : 'text-6xl',
+        ].join(' ')}>
+          {card.text}
+        </p>
       </div>
 
       {/* 단계별 입력 */}
       {stepDef.id === 'fear' ? (
         <FearInput prompt={stepDef.prompt} value={response.fear} onSelect={onFear} />
+      ) : stepDef.id === 'situation' ? (
+        assigning ? (
+          <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] py-10 text-center">
+            <p className="flex items-center justify-center gap-1.5 text-sm text-gray-400">
+              <Sparkles size={14} /> 이 단어에 맞는 문장을 만드는 중...
+            </p>
+          </div>
+        ) : situation ? (
+          <>
+            {geminiFailed && (
+              <p className="text-[11px] text-gray-400 mb-2 px-1">
+                AI 문장 생성에 실패해서 기본 문장으로 진행해요.
+              </p>
+            )}
+            <SituationStep
+              assignment={situation}
+              selected={response.situation}
+              onSelect={v => onAssess('situation', v)}
+            />
+          </>
+        ) : (
+          // 배정이 없는 예외 상황 — 단계를 막지 않고 건너뛸 수 있게 한다.
+          <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4 text-center">
+            <p className="text-sm text-gray-500 mb-3">이 소리는 상황 문장을 만들지 못했어요.</p>
+            <button
+              onClick={() => onAssess('situation', UNKNOWN_ASSESSMENT.value)}
+              className="rounded-xl px-4 py-2.5 text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+            >
+              건너뛰기
+            </button>
+          </div>
+        )
       ) : (
         <SpeakInput
           prompt={stepDef.prompt}
@@ -540,12 +579,10 @@ function SpeakInput({
 
 // 완료 화면 — 결과를 계산하고, 완주한 경우에만 저장한 뒤 지도를 보여준다.
 function DoneScreen({
-  cards, responses, simulation, recordingSessionId, onClose,
+  cards, responses, onClose,
 }: {
   cards: SoundCard[];
   responses: Record<string, SoundResponse>;
-  simulation?: SimulationResult;
-  recordingSessionId?: string;
   onClose: () => void;
 }) {
   const [result, setResult] = useState<SoundMapResult | null>(null);
@@ -556,20 +593,12 @@ function DoneScreen({
     if (ranRef.current) return;
     ranRef.current = true;
 
-    // simulation 이 undefined 면 Stage 4 도입 전과 완전히 같은 결과가 나온다.
-    const computed = computeSoundMapResult(cards, responses, simulation);
+    // 상황(4단계) 응답은 responses 안에 이미 들어 있다 — 별도 인자가 필요 없다.
+    const computed = computeSoundMapResult(cards, responses);
     const stamp = () => ({ ...computed, id: 'unsaved', createdAt: new Date().toISOString() });
-
-    // 지도를 저장하지 못하면 녹음도 남기지 않는다.
-    // "진행 상황은 저장되지 않아요"라고 안내해 놓고 오디오만 기기에 남으면
-    // 사용자가 예상하지 못한 데이터가 쌓이고, 나중에 지울 방법도 없어진다.
-    const dropOrphanClips = () => {
-      if (recordingSessionId) void deleteClipsBySession(recordingSessionId);
-    };
 
     // 중간에 빠져나온 기록은 저장하지 않는다 (화면에서만 보여줌).
     if (!isSoundMapComplete(cards, responses)) {
-      dropOrphanClips();
       setResult(stamp());
       setUnsaved(true);
       return;
@@ -580,22 +609,13 @@ function DoneScreen({
     // 그때 alive 가 이미 false 면 setResult 가 영영 호출되지 않아 "만드는 중..." 에서 멈춘다.
     // 중복 저장은 ranRef 가 막고 있고, React 18 에서 언마운트 후 setState 는 조용한 no-op 이다.
     saveSoundMapResult(computed)
-      .then(saved => {
-        // 녹음은 지도보다 먼저 만들어지므로, 지도 id 가 정해진 지금 뒤늦게 붙인다.
-        // 실패해도 결과 표시는 막지 않는다 — 오디오가 새어 나가는 일은 어차피 없다.
-        if (recordingSessionId) {
-          void attachSoundMapId(recordingSessionId, saved.id).finally(() => setResult(saved));
-        } else {
-          setResult(saved);
-        }
-      })
+      .then(setResult)
       .catch(() => {
         // 저장에 실패해도 방금 만든 지도는 반드시 보여준다.
-        dropOrphanClips();
         setResult(stamp());
         setUnsaved(true);
       });
-  }, [cards, responses, simulation, recordingSessionId]);
+  }, [cards, responses]);
 
   if (!result) {
     return (
@@ -613,7 +633,6 @@ function DoneScreen({
         {unsaved && (
           <p className="text-xs text-amber-600 mt-2">
             이번 기록은 저장되지 않았어요. 화면을 닫으면 사라집니다.
-            {recordingSessionId && ' 녹음도 함께 지웠어요.'}
           </p>
         )}
       </div>

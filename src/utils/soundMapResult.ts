@@ -130,6 +130,10 @@ export interface SoundMapCardResult {
   threshold: PressureThreshold;
   fearGap: FearGap;
   recordingMode?: RecordingMode;
+  // ── 4단계(상황) — 건너뛴 카드/예전 지도에는 없다 ──
+  situationScenarioId?: string;
+  situationScenarioLabel?: string;
+  situationSentence?: string;
 }
 
 export interface StepStat {
@@ -208,11 +212,17 @@ export function computeSoundMapResult(
     const r = responses[card.id];
     const ladderThreshold = thresholdOf(r);
 
-    // Stage 4 승격 — 1~3단계를 '전부' 통과한 소리만 대상이다.
+    // 상황(4단계)에서 걸렸는가 — 두 경로 모두 인정한다:
+    //   ① 카드 자체의 4단계 응답 (사다리 안에서 상황까지 올라간 경우)
+    //   ② 별도 시뮬레이션에서 같은 단어가 걸린 경우 (예전 방식 호환)
+    const caughtHere = r?.situation === 'partial' || r?.situation === 'blocked';
+    const caughtElsewhere = caughtInSimulation.has(normalizeWord(card.text));
+
+    // 승격 — 1~3단계를 '전부' 통과한 소리만 대상이다.
     // 이미 낮은 압력에서 걸린 소리는 그쪽이 더 근본적인 발견이므로 절대 덮어쓰지 않는다.
     // (임계점 = 가장 낮은 압력에서 처음 걸린 지점, 이라는 불변식을 지킨다)
     const threshold: PressureThreshold =
-      ladderThreshold === 'none' && caughtInSimulation.has(normalizeWord(card.text))
+      ladderThreshold === 'none' && (caughtHere || caughtElsewhere)
         ? 'simulation'
         : ladderThreshold;
 
@@ -247,6 +257,12 @@ export function computeSoundMapResult(
       threshold,
       fearGap,
       recordingMode: r?.recordingMode,
+      // 상황을 겪은 카드만 맥락을 남긴다 — 처방에서 '어느 상황이었는지'를 붙이는 데 쓴다.
+      ...(r?.situationScenarioId ? {
+        situationScenarioId: r.situationScenarioId,
+        situationScenarioLabel: r.situationScenarioLabel,
+        situationSentence: r.situationSentence,
+      } : {}),
     };
   });
 

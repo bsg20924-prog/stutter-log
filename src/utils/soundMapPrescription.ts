@@ -195,6 +195,76 @@ const SIMULATION_REASON =
  *                        이 필터가 없으면 원래 어려웠던 소리까지 노출 처방을 받아
  *                        "발성 연습이 필요한 소리"를 "상황만 익히면 되는 소리"로 오진하게 된다.
  */
+/** 두 경로(카드 4단계 / 별도 시뮬레이션)가 공유하는 최소 입력 */
+export interface SituationHit {
+  word: string;
+  scenarioId: string;
+  scenarioLabel: string;
+  sentence: string;
+}
+
+/** 상황에서 걸린 항목들을 시나리오별로 묶어 노출 처방을 만든다. */
+export function buildSituationPrescriptions(hits: SituationHit[]): SimulationPrescription[] {
+  const buckets = new Map<string, SimulationPrescription>();
+
+  for (const h of hits) {
+    if (!h.word || !h.scenarioId) continue;
+    const existing = buckets.get(h.scenarioId);
+    if (existing) {
+      if (!existing.words.some(x => normalizeWord(x) === normalizeWord(h.word))) {
+        existing.words.push(h.word);
+      }
+      if (h.sentence && !existing.sentences.includes(h.sentence)) existing.sentences.push(h.sentence);
+      continue;
+    }
+    buckets.set(h.scenarioId, {
+      scenarioId: h.scenarioId,
+      scenarioLabel: h.scenarioLabel,
+      words: [h.word],
+      sentences: h.sentence ? [h.sentence] : [],
+      strategies: EXPOSURE_STRATEGIES,
+      headline: SIMULATION_HEADLINE,
+      reason: SIMULATION_REASON,
+      exposureSteps: EXPOSURE_LADDER[h.scenarioId] ?? DEFAULT_EXPOSURE,
+    });
+  }
+
+  // 걸린 단어가 많은 상황부터 — 가장 자주 발목을 잡는 상황을 먼저 다루게 한다.
+  return [...buckets.values()].sort((a, b) => b.words.length - a.words.length);
+}
+
+/**
+ * 소리 지도 카드에서 직접 뽑는다 (4단계가 사다리에 들어온 뒤의 기본 경로).
+ * 카드가 곧 단어이므로 단어 매칭이 필요 없다 — 승격 판정은 이미 threshold 에 반영돼 있다.
+ */
+export function buildSituationPrescriptionsFromCards(
+  cards: {
+    text: string;
+    threshold: PressureThreshold;
+    situationScenarioId?: string;
+    situationScenarioLabel?: string;
+    situationSentence?: string;
+  }[],
+): SimulationPrescription[] {
+  return buildSituationPrescriptions(
+    cards
+      .filter(c => c.threshold === 'simulation' && c.situationScenarioId)
+      .map(c => ({
+        word: c.text,
+        scenarioId: c.situationScenarioId!,
+        scenarioLabel: c.situationScenarioLabel ?? '상황',
+        sentence: c.situationSentence ?? '',
+      })),
+  );
+}
+
+/**
+ * 별도 시뮬레이션(단독 실행/구 Stage 4) 결과에서 뽑는다.
+ *
+ * @param simulationWords 'simulation' 등급으로 승격된 단어 — 1~3단계를 통과한 것만 들어 있다.
+ *                        이 필터가 없으면 원래 어려웠던 소리까지 노출 처방을 받아
+ *                        "발성 연습이 필요한 소리"를 "상황만 익히면 되는 소리"로 오진하게 된다.
+ */
 export function buildSimulationPrescriptions(
   simulation: SimulationResult | undefined,
   simulationWords: string[] | undefined,
@@ -204,35 +274,18 @@ export function buildSimulationPrescriptions(
   const promoted = new Set((simulationWords ?? []).map(normalizeWord).filter(Boolean));
   if (promoted.size === 0) return [];
 
-  const buckets = new Map<string, SimulationPrescription>();
-
+  const hits: SituationHit[] = [];
   for (const s of simulation.sentences) {
     if (s.assessment !== 'partial' && s.assessment !== 'blocked') continue;
-
-    const words = s.sourceWords.filter(w => promoted.has(normalizeWord(w)));
-    if (words.length === 0) continue;
-
-    const existing = buckets.get(s.scenarioId);
-    if (existing) {
-      for (const w of words) {
-        if (!existing.words.some(x => normalizeWord(x) === normalizeWord(w))) existing.words.push(w);
-      }
-      if (!existing.sentences.includes(s.text)) existing.sentences.push(s.text);
-      continue;
+    for (const w of s.sourceWords) {
+      if (!promoted.has(normalizeWord(w))) continue;
+      hits.push({
+        word: w,
+        scenarioId: s.scenarioId,
+        scenarioLabel: s.scenarioLabel,
+        sentence: s.text,
+      });
     }
-
-    buckets.set(s.scenarioId, {
-      scenarioId: s.scenarioId,
-      scenarioLabel: s.scenarioLabel,
-      words: [...new Set(words)],
-      sentences: [s.text],
-      strategies: EXPOSURE_STRATEGIES,
-      headline: SIMULATION_HEADLINE,
-      reason: SIMULATION_REASON,
-      exposureSteps: EXPOSURE_LADDER[s.scenarioId] ?? DEFAULT_EXPOSURE,
-    });
   }
-
-  // 걸린 단어가 많은 상황부터 — 가장 자주 발목을 잡는 상황을 먼저 다루게 한다.
-  return [...buckets.values()].sort((a, b) => b.words.length - a.words.length);
+  return buildSituationPrescriptions(hits);
 }

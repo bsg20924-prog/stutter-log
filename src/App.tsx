@@ -17,6 +17,7 @@ import QuickLogInput from './components/QuickLogInput';
 import ChallengeList from './components/ChallengeList';
 import SoundMapPanel from './components/SoundMapPanel';
 import SoundMapTest from './components/SoundMapTest';
+import SimulationTest from './components/SimulationTest';
 import InstallPrompt from './components/InstallPrompt';
 import './index.css';
 
@@ -34,6 +35,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('record');
   const [showSoundMap, setShowSoundMap] = useState(false);
+  const [showSimulation, setShowSimulation] = useState(false);
   const { addEntry, loading } = useLogStore();
   // 소리 지도를 한 번도 만들지 않은 사용자에게만 기록 탭 상단 유도 카드를 띄운다.
   const { latest: soundMap, loading: soundMapLoading } = useLatestSoundMap();
@@ -90,7 +92,12 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
           )}
           {activeTab === 'log'       && <LogList />}
           {activeTab === 'challenge' && <ChallengeList />}
-          {activeTab === 'soundmap'  && <SoundMapPanel onStart={() => setShowSoundMap(true)} />}
+          {activeTab === 'soundmap'  && (
+            <SoundMapPanel
+              onStart={() => setShowSoundMap(true)}
+              onStartSimulation={() => setShowSimulation(true)}
+            />
+          )}
           {activeTab === 'stats'     && <StatsPanel />}
         </div>
       </main>
@@ -101,6 +108,20 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
           onClose={() => {
             setShowSoundMap(false);
             setActiveTab('soundmap');
+          }}
+        />
+      )}
+
+      {/* ── 상황 시뮬레이션 단독 실행 (전체 화면) ── */}
+      {showSimulation && (
+        <SimulationTest
+          onClose={() => {
+            setShowSimulation(false);
+            setActiveTab('soundmap');
+          }}
+          onStartSoundMap={() => {
+            setShowSimulation(false);
+            setShowSoundMap(true);
           }}
         />
       )}

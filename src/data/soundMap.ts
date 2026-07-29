@@ -124,12 +124,12 @@ export const UNKNOWN_ASSESSMENT: { value: Assessment; label: string } = {
   label: '모르겠음',
 };
 
-// 4단계 (Step 0~3)
-export type SoundStepId = 'fear' | 'whisper' | 'normal' | 'recording';
+// 5단계 (Step 0~4)
+export type SoundStepId = 'fear' | 'whisper' | 'normal' | 'recording' | 'situation';
 
 export interface SoundStep {
   id: SoundStepId;
-  index: number;      // 0~3
+  index: number;      // 0~4
   short: string;      // 스테퍼용 짧은 라벨
   title: string;      // 카드 상단 안내
   prompt: string;     // 행동 지시
@@ -140,11 +140,25 @@ export const SOUND_STEPS: SoundStep[] = [
   { id: 'whisper',   index: 1, short: '속삭임',    title: '1단계 · 속삭임',        prompt: '속삭이듯 아주 작게 소리 내보세요.' },
   { id: 'normal',    index: 2, short: '목소리',    title: '2단계 · 목소리',        prompt: '이제 평소 목소리로 말해보세요.' },
   { id: 'recording', index: 3, short: '녹음',      title: '3단계 · 녹음 압박',     prompt: '녹음이 도는 상태에서 그대로 말해보세요.' },
+  // 압력 사다리의 꼭대기. 같은 소리를 '상황 속 문장'으로 말한다.
+  // ⚠️ 이 단계는 임계점 계산 루프(LADDER)에 넣지 않는다 — 넣으면 상황을 건너뛴 카드가
+  // thresholdOf 에서 unknown 으로 떨어져 1~3단계 결과까지 통째로 날아간다.
+  { id: 'situation', index: 4, short: '상황',      title: '4단계 · 실제 상황',     prompt: '상대의 말을 듣고, 아래 문장으로 답해보세요.' },
 ];
 
 // 3단계에서 실제 마이크 압박이 걸렸는지 — 오디오 자체는 절대 저장하지 않고,
 // 나중에 "진짜 녹음 압박"과 "수동(마이크 없이) 압박"을 구분해 분석하기 위한 표시만 남긴다.
 export type RecordingMode = 'mic' | 'manual';
+
+/** 4단계에서 그 카드에 배정된 상황 문장 */
+export interface SituationAssignment {
+  scenarioId: string;
+  scenarioLabel: string;
+  ttsPrompt: string;
+  sentence: string;
+  /** 문장을 어떻게 만들었는지 — Gemini 가 만든 문장과 템플릿 문장의 품질 차이를 나중에 구분하기 위해 */
+  source: 'gemini' | 'template';
+}
 
 // 카드 하나에 대한 응답 (단계별)
 export interface SoundResponse {
@@ -153,6 +167,12 @@ export interface SoundResponse {
   normal?: Assessment;
   recording?: Assessment;
   recordingMode?: RecordingMode;
+  // ── 4단계 (상황) — 선택이라 없을 수 있다 ──
+  situation?: Assessment;
+  situationScenarioId?: string;
+  situationScenarioLabel?: string;
+  situationSentence?: string;
+  situationSource?: 'gemini' | 'template';
 }
 
 // 사용자가 추가하는 "무서운 단어" 추천 칩

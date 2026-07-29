@@ -25,6 +25,14 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
+    // 상황 시뮬레이션 단독 실행 결과.
+    // 소리 지도와 분리된 이유: 압력 사다리를 돌지 않고 시뮬레이션만 할 수 있고,
+    // 그때는 카드/임계점 데이터가 없어 SoundMapResult 의 모양을 채울 수 없다.
+    // 여기에도 오디오는 없다 — 녹음은 기기의 IndexedDB 에만 저장된다.
+    match /simulations/{docId} {
+      allow read, write: if isOwner();
+    }
+
     // 그 외 경로는 모두 차단
     match /{document=**} {
       allow read, write: if false;
