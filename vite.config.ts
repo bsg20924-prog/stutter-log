@@ -11,7 +11,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',   // 새 버전을 배포하면 다음 실행에서 자동 반영
+      registerType: 'autoUpdate',
+      // 기본 주입 스크립트(registerSW.js)는 등록만 하고 끝나서, 새 워커가 활성화돼도
+      // 이미 열린 페이지가 옛 JS 를 계속 실행한다 = 배포해도 화면이 안 바뀐다.
+      // 직접 등록하면서 controllerchange 를 잡아 갱신까지 처리한다 (src/utils/swUpdate.ts).
+      injectRegister: null,
       includeAssets: ['apple-touch-icon.png', 'vocal_tract.jpg'],
       manifest: {
         name: '말막힘 일지',

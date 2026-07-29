@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider, OWNER_EMAIL } from './firebase';
 import { pullGeminiKey } from './utils/gemini';
+import { blockReload, onUpdatePending, applyUpdateNow } from './utils/swUpdate';
 import { LogStoreProvider, useLogStore } from './hooks/useLogStore';
 import { useLatestSoundMap } from './hooks/useSoundMaps';
 import { LogEntry } from './types';
@@ -38,6 +39,15 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [showSoundMap, setShowSoundMap] = useState(false);
   const [showSimulation, setShowSimulation] = useState(false);
   const { addEntry, loading } = useLogStore();
+  const [updateReady, setUpdateReady] = useState(false);
+
+  // 검사/시뮬레이션이 열려 있는 동안에는 자동 새로고침을 막는다 —
+  // 응답이 메모리에만 있어서 중간에 새로고침되면 진행이 통째로 날아간다.
+  useEffect(() => {
+    blockReload(showSoundMap || showSimulation);
+  }, [showSoundMap, showSimulation]);
+
+  useEffect(() => onUpdatePending(setUpdateReady), []);
   // 소리 지도를 한 번도 만들지 않은 사용자에게만 기록 탭 상단 유도 카드를 띄운다.
   const { latest: soundMap, loading: soundMapLoading } = useLatestSoundMap();
 
@@ -125,6 +135,21 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
             setShowSoundMap(true);
           }}
         />
+      )}
+
+      {/* ── 새 버전 안내 — 검사 중이라 자동 반영을 미룬 경우에만 뜬다 ── */}
+      {updateReady && (
+        <div className="fixed bottom-24 inset-x-0 z-30 px-4 pointer-events-none">
+          <button
+            onClick={applyUpdateNow}
+            className="pointer-events-auto mx-auto flex max-w-lg w-full items-center gap-2 rounded-xl bg-gray-800 text-white px-4 py-3 shadow-lg"
+          >
+            <span className="text-xs font-medium flex-1 text-left">
+              새 버전이 준비됐어요. 지금 진행 중인 건 끝내고 반영돼요.
+            </span>
+            <span className="text-xs font-bold shrink-0">지금 새로고침</span>
+          </button>
+        </div>
       )}
 
       {/* ── 하단 탭 바 (iOS 플로팅) ── */}
