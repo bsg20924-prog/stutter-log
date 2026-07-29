@@ -51,15 +51,16 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   // 상대 음성은 **카드가 시작될 때** 만들기 시작한다.
   // 4단계에서 만들기 시작하면 생성(5~6초)보다 사용자가 「시작」을 누르는 게 빨라서
   // 항상 브라우저 음성으로 떨어진다. 0단계부터 만들면 4단계 도달까지 20~30초를 번다.
-  // 다음 카드 것도 미리 준비해 카드 전환 직후를 메운다.
+  //
+  // ⚠️ 현재 카드 것만 만든다. 무료 한도가 분당 10회뿐이라(실측: limit 10, TTS 모델)
+  // 다음 카드까지 미리 만들면 호출이 2배가 되어 금방 429 에 걸린다.
+  // 카드당 20~30초면 한 건 만드는 데 충분하다.
   useEffect(() => {
     if (stage !== 'card') return;
     const key = getGeminiKey();
     if (!key) return;
-    for (const idx of [cardIndex, cardIndex + 1]) {
-      const a = situations[cards[idx]?.id ?? ''];
-      if (a) prefetchTts(a.ttsPrompt, key, a.scenarioId);
-    }
+    const a = situations[cards[cardIndex]?.id ?? ''];
+    if (a) prefetchTts(a.ttsPrompt, key, a.scenarioId);
   }, [stage, cardIndex, cards, situations]);
 
   // Stage 4 문장 재료 — 아직 극복하지 못한 도전 단어를 그대로 쓴다.
