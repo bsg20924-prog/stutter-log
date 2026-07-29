@@ -13,6 +13,7 @@ import {
 import { getZoneFrequency } from '../utils/phonetics';
 import { getTacticLabel } from '../data/strategies';
 import ArticulationMap from './ArticulationMap';
+import TrendSection from './TrendSection';
 
 const CHART_STYLE = { fontSize: 11, fill: '#64748b' };
 
@@ -55,19 +56,27 @@ export default function StatsPanel() {
     );
   }
 
-  const total   = entries.length;
+  const total = entries.length;
+
+  // 요약 카드는 status 기준 — outcome 은 상세 기록에만 있어서
+  // 간편 기록(3탭 경로)이 통째로 빠지면 비율이 0% 로 보인다.
+  const overcomeCount = entries.filter(e => e.status === 'overcome').length;
+  const avoidedCount  = entries.filter(e => e.status === 'avoided').length;
+  const successRate = Math.round((overcomeCount / total) * 100);
+  const avoidRate   = Math.round((avoidedCount  / total) * 100);
+
+  // 결과 분포(도넛)는 outcome 기준 그대로 — 대신 분모를 상세 기록 수로 잡는다.
   const success = outcomeRaw.filter(d => SUCCESS_OUTCOMES.has(d.outcome)).reduce((s, d) => s + d.count, 0);
   const detour  = outcomeRaw.filter(d => DETOUR_OUTCOMES.has(d.outcome)).reduce((s, d) => s + d.count, 0);
   const avoid   = outcomeRaw.filter(d => AVOID_OUTCOMES.has(d.outcome)).reduce((s, d) => s + d.count, 0);
+  const outcomeTotal = success + detour + avoid;
 
-  const avoidRate   = Math.round((avoid   / total) * 100);
-  const successRate = Math.round((success / total) * 100);
-  const detourRate  = Math.round((detour  / total) * 100);
+  const pct = (n: number) => outcomeTotal > 0 ? Math.round((n / outcomeTotal) * 100) : 0;
 
   const pieData = [
-    { name: '성공', value: success, color: '#2dd4bf' },
-    { name: '우회', value: detour,  color: '#fb923c' },
-    { name: '회피', value: avoid,   color: '#f87171' },
+    { name: '성공', value: success, color: '#0d9488' },
+    { name: '우회', value: detour,  color: '#d97706' },
+    { name: '회피', value: avoid,   color: '#e11d48' },
   ].filter(d => d.value > 0);
 
   const topSituation = situationData[0];
@@ -81,9 +90,9 @@ export default function StatsPanel() {
       {/* 요약 카드 */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: '총 기록',  value: `${total}회` },
-          { label: '성공률',   value: `${successRate}%` },
-          { label: '회피율',   value: `${avoidRate}%` },
+          { label: '총 기록',    value: `${total}회` },
+          { label: '편안함 비율', value: `${successRate}%` },
+          { label: '회피율',     value: `${avoidRate}%` },
         ].map(({ label, value }) => (
           <div key={label} className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-3 text-center">
             <p className="text-xl font-bold text-teal-600">{value}</p>
@@ -92,11 +101,14 @@ export default function StatsPanel() {
         ))}
       </div>
 
+      {/* 변화 추이 — 주/월 구간별 구성과 기간 비교 */}
+      <TrendSection entries={entries} />
+
       {/* 결과 분포 — 도넛 PieChart */}
       {pieData.length > 0 && (
         <ChartSection
           title="결과 분포"
-          insight={`성공 ${successRate}% · 우회 ${detourRate}% · 회피 ${avoidRate}%`}
+          insight={`성공 ${pct(success)}% · 우회 ${pct(detour)}% · 회피 ${pct(avoid)}% — 결과를 고른 기록 ${outcomeTotal}개 기준`}
         >
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
