@@ -6,6 +6,7 @@ import {
   onAuthStateChanged, signInWithPopup, signOut, type User,
 } from 'firebase/auth';
 import { auth, googleProvider, OWNER_EMAIL } from './firebase';
+import { pullGeminiKey } from './utils/gemini';
 import { LogStoreProvider, useLogStore } from './hooks/useLogStore';
 import { useLatestSoundMap } from './hooks/useSoundMaps';
 import { LogEntry } from './types';
@@ -218,6 +219,10 @@ export default function App() {
   useEffect(() => onAuthStateChanged(auth, u => {
     setUser(u);
     setChecking(false);
+    // 로그인이 확인된 뒤에만 동기화된 Gemini 키를 가져온다.
+    // 이 문서는 firestore.rules 의 isOwner() 로 잠겨 있어 로그인 전에는 읽히지 않는다.
+    // 실패해도 무시 — 키가 없으면 기본 문장으로 동작할 뿐이다.
+    if (u?.email === OWNER_EMAIL) void pullGeminiKey();
   }), []);
 
   async function handleSignIn() {

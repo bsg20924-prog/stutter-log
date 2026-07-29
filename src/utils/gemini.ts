@@ -14,12 +14,23 @@
 // API 형태는 2026-07 기준 Interactions API 를 따른다.
 // 구 models/{model}:generateContent 는 레거시로 분류됐다.
 
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const MODEL = 'gemini-3.6-flash';
 const KEY_STORAGE = 'stutter_gemini_key';
 const TIMEOUT_MS = 20000;
 
-// ── 키 보관 (이 기기에만) ──────────────────────────────────
+// 기기 간 동기화용 Firestore 경로.
+// firestore.rules 의 isOwner() 가 Google 서버에서 강제되므로,
+// 로그인한 소유자 외에는 이 문서를 읽을 수 없다.
+const SETTINGS_DOC = ['settings', 'gemini'] as const;
+const USE_LOCAL_ONLY = import.meta.env.DEV;   // dev 는 로그인을 건너뛰어 규칙에 막힌다
+
+// ── 키 보관 ───────────────────────────────────────────────
+// localStorage 를 '현재 값'으로 삼고, Firestore 는 기기 간 동기화 원본으로 쓴다.
+// 이렇게 하면 호출부는 동기 함수 그대로 쓸 수 있고 오프라인에서도 동작한다.
 export function getGeminiKey(): string {
   try {
     return localStorage.getItem(KEY_STORAGE) ?? '';
@@ -28,13 +39,66 @@ export function getGeminiKey(): string {
   }
 }
 
-export function setGeminiKey(key: string): void {
+function writeLocal(key: string): void {
   try {
-    const trimmed = key.trim();
-    if (trimmed) localStorage.setItem(KEY_STORAGE, trimmed);
+    if (key) localStorage.setItem(KEY_STORAGE, key);
     else localStorage.removeItem(KEY_STORAGE);
   } catch {
     // 저장소를 못 쓰면 이번 세션만 포기 — 템플릿으로 동작한다.
+  }
+}
+
+/** 이 기기에만 저장 (동기화 안 함) */
+export function setGeminiKey(key: string): void {
+  writeLocal(key.trim());
+}
+
+/**
+ * 모든 기기에서 쓰도록 Firestore 에도 저장한다.
+ * ⚠️ 이 문서는 isOwner() 로 잠겨 있어 로그인한 소유자만 읽을 수 있다.
+ * 번들에 넣는 것과 결정적으로 다른 점이다 — 번들은 로그인 없이 누구나 받는다.
+ */
+export async function syncGeminiKey(key: string): Promise<boolean> {
+  const trimmed = key.trim();
+  writeLocal(trimmed);
+  if (USE_LOCAL_ONLY) return false;
+  try {
+    if (trimmed) {
+      await setDoc(doc(db, ...SETTINGS_DOC), { apiKey: trimmed, updatedAt: new Date().toISOString() });
+    } else {
+      await deleteDoc(doc(db, ...SETTINGS_DOC));
+    }
+    return true;
+  } catch {
+    // 동기화 실패해도 이 기기에서는 동작한다.
+    return false;
+  }
+}
+
+/**
+ * 앱 시작 시 Firestore 에 저장된 키를 이 기기로 가져온다.
+ * 실패하면 조용히 넘어간다 — 키가 없으면 템플릿 문장으로 동작할 뿐이다.
+ */
+export async function pullGeminiKey(): Promise<boolean> {
+  if (USE_LOCAL_ONLY) return false;
+  try {
+    const snap = await getDoc(doc(db, ...SETTINGS_DOC));
+    const remote = snap.exists() ? String(snap.data()?.apiKey ?? '') : '';
+    if (remote && remote !== getGeminiKey()) writeLocal(remote);
+    return !!remote;
+  } catch {
+    return false;
+  }
+}
+
+/** 이 기기에서 지우고, 동기화된 키도 함께 지운다. */
+export async function clearGeminiKeyEverywhere(): Promise<void> {
+  writeLocal('');
+  if (USE_LOCAL_ONLY) return;
+  try {
+    await deleteDoc(doc(db, ...SETTINGS_DOC));
+  } catch {
+    // 무시
   }
 }
 

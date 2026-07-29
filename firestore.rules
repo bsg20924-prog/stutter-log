@@ -33,6 +33,16 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
+    // 앱 설정(기기 간 동기화). Gemini API 키가 여기 들어간다.
+    //
+    // ⚠️ 키를 프론트엔드 번들에 넣지 않는 이유가 바로 이 규칙이다:
+    // 번들(/assets/*.js)은 로그인 없이 누구나 내려받을 수 있어서 거기 박힌 키는 곧 공개다.
+    // 반면 이 컬렉션은 Google 서버가 isOwner() 를 강제하므로
+    // 로그인한 소유자 외에는 읽을 수 없다.
+    match /settings/{docId} {
+      allow read, write: if isOwner();
+    }
+
     // 그 외 경로는 모두 차단
     match /{document=**} {
       allow read, write: if false;

@@ -7,8 +7,11 @@
 // 여기서 입력한 키는 이 기기의 localStorage 에만 남고 서버·git·번들 어디에도 안 들어간다.
 
 import { useState } from 'react';
-import { Sparkles, Check, X, ExternalLink, Loader2, Eye, EyeOff } from 'lucide-react';
-import { getGeminiKey, setGeminiKey, maskKey, testGeminiKey } from '../utils/gemini';
+import { Sparkles, Check, X, ExternalLink, Loader2, Eye, EyeOff, Cloud, Smartphone } from 'lucide-react';
+import {
+  getGeminiKey, setGeminiKey, syncGeminiKey, clearGeminiKeyEverywhere,
+  maskKey, testGeminiKey,
+} from '../utils/gemini';
 
 export default function GeminiKeySettings() {
   const [saved, setSaved] = useState(getGeminiKey());
@@ -16,23 +19,44 @@ export default function GeminiKeySettings() {
   const [editing, setEditing] = useState(!getGeminiKey());
   const [reveal, setReveal] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  // 기본값을 '모든 기기'로 둔다 — 이게 안전하게 동기화하는 유일한 경로이고,
+  // 번들에 키를 박는 것보다 안전하면서 결과는 같다(어느 기기에서든 바로 동작).
+  const [syncAll, setSyncAll] = useState(true);
 
-  function save() {
+  async function save() {
     const key = input.trim();
     if (!key) return;
-    setGeminiKey(key);
-    setSaved(key);
-    setInput('');
-    setEditing(false);
-    setResult(null);
+    setBusy(true);
+    try {
+      if (syncAll) {
+        const ok = await syncGeminiKey(key);
+        setResult(ok
+          ? { ok: true, message: '저장했어요. 로그인한 모든 기기에서 바로 쓸 수 있어요.' }
+          : { ok: false, message: '이 기기에는 저장했지만 동기화는 실패했어요.' });
+      } else {
+        setGeminiKey(key);
+        setResult(null);
+      }
+      setSaved(key);
+      setInput('');
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function remove() {
-    setGeminiKey('');
-    setSaved('');
-    setEditing(true);
-    setResult(null);
+  async function remove() {
+    setBusy(true);
+    try {
+      await clearGeminiKeyEverywhere();
+      setSaved('');
+      setEditing(true);
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function test() {
@@ -83,7 +107,8 @@ export default function GeminiKeySettings() {
             </button>
             <button
               onClick={remove}
-              className="rounded-xl px-3 py-2.5 text-xs font-medium text-gray-400 hover:text-red-500 transition-colors"
+              disabled={busy}
+              className="rounded-xl px-3 py-2.5 text-xs font-medium text-gray-400 hover:text-red-500 disabled:opacity-50 transition-colors"
             >
               삭제
             </button>
@@ -102,13 +127,35 @@ export default function GeminiKeySettings() {
               className="flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none"
             />
           </div>
+          {/* 저장 위치 — 번들에 박지 않고도 모든 기기에서 쓰게 하는 안전한 경로 */}
+          <div className="flex gap-1.5">
+            {[
+              { on: true,  icon: <Cloud size={12} />,      label: '모든 기기' },
+              { on: false, icon: <Smartphone size={12} />, label: '이 기기만' },
+            ].map(opt => (
+              <button
+                key={String(opt.on)}
+                type="button"
+                onClick={() => setSyncAll(opt.on)}
+                className={[
+                  'flex-1 flex items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-medium border transition-colors',
+                  syncAll === opt.on
+                    ? 'bg-teal-50 text-teal-700 border-teal-200'
+                    : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300',
+                ].join(' ')}
+              >
+                {opt.icon}{opt.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex gap-2">
             <button
               onClick={save}
-              disabled={!input.trim()}
-              className="flex-1 rounded-xl py-2.5 text-xs font-semibold bg-teal-500 text-white disabled:bg-gray-200 disabled:text-gray-400 hover:bg-teal-600 transition-colors"
+              disabled={!input.trim() || busy}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold bg-teal-500 text-white disabled:bg-gray-200 disabled:text-gray-400 hover:bg-teal-600 transition-colors"
             >
-              저장
+              {busy ? <><Loader2 size={13} className="animate-spin" /> 저장 중</> : '저장'}
             </button>
             {saved && (
               <button
@@ -141,8 +188,10 @@ export default function GeminiKeySettings() {
       )}
 
       <p className="text-[11px] text-gray-400 mt-3 leading-relaxed border-t border-gray-100 pt-3">
-        키는 <b className="text-gray-500">이 기기에만</b> 저장돼요. 서버에 올라가지 않습니다.
-        {' '}호출 요금은 사용자 본인 계정에 청구되며, 문장 몇 개 수준이면 무료 한도 안에서 끝납니다.
+        ‘모든 기기’로 저장하면 <b className="text-gray-500">내 계정으로 로그인한 기기에서만</b> 읽을 수 있는
+        곳에 보관돼요(Firestore 보안 규칙이 서버에서 막아 줍니다).
+        {' '}앱 파일 자체에는 절대 넣지 않아요 — 그건 로그인 없이 누구나 받을 수 있어서 곧 공개가 됩니다.
+        {' '}요금은 본인 계정에 청구되며, 문장 몇 개 수준이면 무료 한도 안에서 끝납니다.
       </p>
     </div>
   );
