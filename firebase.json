@@ -17,6 +17,13 @@
         ]
       },
       {
+        "//": "루트('/')는 위 패턴에 매칭되지 않는다. 사용자는 늘 '/' 로 들어오는데 여기가 max-age=3600 이면 배포가 최대 1시간 동안 안 보인다. 실제로 그 일이 있었다.",
+        "source": "/",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
         "//": "진입 문서와 매니페스트도 항상 최신을 받아야 한다.",
         "source": "/{index.html,manifest.webmanifest}",
         "headers": [
