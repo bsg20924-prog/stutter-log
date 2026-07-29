@@ -14,6 +14,8 @@ import { RESPONSE_WINDOW_SEC, AMBIENT_META } from '../data/simulation';
 import {
   primeAudio, speakPrompt, cancelSpeech, SpeakHandle, SpeechOutcome,
 } from '../utils/speech';
+import { prefetchTts } from '../utils/geminiTts';
+import { getGeminiKey } from '../utils/gemini';
 
 type Phase = 'ready' | 'prompt' | 'countdown' | 'respond' | 'assess';
 
@@ -52,7 +54,10 @@ export default function SituationStep({
     setOutcome(null);
     setCountdown(COUNTDOWN_FROM);
     setRespondLeft(RESPONSE_WINDOW_SEC);
-  }, [assignment.sentence, clearTimer]);
+    // 이 카드의 상대 멘트를 미리 만들어 둔다 (fire-and-forget).
+    // 분당 호출 제한이 낮아 한 번에 몰아 만들 수 없으므로, 도달할 때 하나씩 만든다.
+    prefetchTts(assignment.ttsPrompt, getGeminiKey());
+  }, [assignment.sentence, assignment.ttsPrompt, clearTimer]);
 
   // 화면을 벗어나면 남은 발화·타이머를 정리한다.
   useEffect(() => () => {

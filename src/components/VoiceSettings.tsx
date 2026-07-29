@@ -5,11 +5,16 @@
 // 들리는지는 결국 들어봐야 안다 — 그래서 직접 고르고 미리 들을 수 있게 한다.
 
 import { useState, useEffect } from 'react';
-import { Volume2, Check, Sparkles } from 'lucide-react';
+import { Volume2, Check, Sparkles, Loader2 } from 'lucide-react';
 import {
   listKoreanVoices, getPreferredVoiceName, setPreferredVoiceName,
   currentVoiceName, warmUpVoices, speakPrompt,
 } from '../utils/speech';
+import {
+  GEMINI_VOICES, isGeminiTtsOn, setGeminiTtsOn,
+  getGeminiVoice, setGeminiVoice, generateTts, clearTtsCache,
+} from '../utils/geminiTts';
+import { hasGeminiKey, getGeminiKey } from '../utils/gemini';
 
 const SAMPLE = '주문 도와드릴까요?';
 
@@ -17,6 +22,10 @@ export default function VoiceSettings() {
   const [voices, setVoices] = useState(listKoreanVoices());
   const [selected, setSelected] = useState(getPreferredVoiceName());
   const [auto, setAuto] = useState(currentVoiceName());
+  const [aiOn, setAiOn] = useState(isGeminiTtsOn());
+  const [aiVoice, setAiVoice] = useState(getGeminiVoice());
+  const [previewing, setPreviewing] = useState('');
+  const canUseAi = hasGeminiKey();
 
   // 음성 목록은 비동기로 채워진다 — 준비되면 다시 읽는다.
   useEffect(() => warmUpVoices(() => {
@@ -24,14 +33,24 @@ export default function VoiceSettings() {
     setAuto(currentVoiceName());
   }), []);
 
-  if (voices.length <= 1) return null;   // 고를 게 없으면 화면을 어지럽히지 않는다
-
   function choose(name: string) {
     setPreferredVoiceName(name);
     setSelected(name);
     setAuto(currentVoiceName());
     // ⚠️ 버튼 핸들러 안에서 바로 재생해야 iOS 가 허용한다.
     speakPrompt(SAMPLE, () => {});
+  }
+
+  async function chooseAiVoice(id: string) {
+    if (id !== aiVoice) {
+      clearTtsCache();          // 목소리가 바뀌면 이전 캐시는 쓸모없다
+      setGeminiVoice(id);
+      setAiVoice(id);
+    }
+    setPreviewing(id);
+    const url = await generateTts(SAMPLE, getGeminiKey());
+    setPreviewing('');
+    if (url) void new Audio(url).play().catch(() => {});
   }
 
   return (
@@ -46,6 +65,49 @@ export default function VoiceSettings() {
         ✨ 표시는 더 자연스러운 음성이에요.
       </p>
 
+      {/* AI 음성 — 키가 있을 때만 */}
+      {canUseAi && (
+        <div className="mb-3 pb-3 border-b border-gray-100">
+          <label className="flex items-center gap-2 mb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={aiOn}
+              onChange={e => { setGeminiTtsOn(e.target.checked); setAiOn(e.target.checked); }}
+              className="w-4 h-4 accent-teal-500"
+            />
+            <span className="flex items-center gap-1 text-xs font-semibold text-gray-700">
+              <Sparkles size={12} className="text-teal-500" /> AI 음성 쓰기
+            </span>
+          </label>
+          <p className="text-[11px] text-gray-400 leading-relaxed mb-2">
+            브라우저 음성보다 훨씬 사람에 가까워요. 무료 한도의 분당 호출 제한이 낮아
+            <b className="text-gray-500"> 카드에 도달할 때 하나씩</b> 만들고,
+            준비가 안 됐으면 브라우저 음성으로 자동 대체해요.
+          </p>
+          {aiOn && (
+            <div className="flex flex-wrap gap-1.5">
+              {GEMINI_VOICES.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => chooseAiVoice(v.id)}
+                  disabled={previewing !== ''}
+                  className={[
+                    'flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium border transition-colors disabled:opacity-50',
+                    aiVoice === v.id
+                      ? 'bg-teal-500 text-white border-teal-500'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-teal-300',
+                  ].join(' ')}
+                >
+                  {previewing === v.id && <Loader2 size={10} className="animate-spin" />}
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {voices.length <= 1 ? null : (
       <div className="space-y-1.5">
         <button
           onClick={() => choose('')}
@@ -80,10 +142,11 @@ export default function VoiceSettings() {
           </button>
         ))}
       </div>
+      )}
 
       <p className="text-[11px] text-gray-400 mt-3 leading-relaxed border-t border-gray-100 pt-3">
-        상황에 따라 말하는 속도와 높이가 자동으로 달라져요 —
-        면접관은 천천히, 친구는 빠르게 말합니다.
+        상황에 따라 말하는 속도가 조금씩 달라져요 — 면접관은 천천히, 친구는 빠르게.
+        {' '}음높이는 건드리지 않아요(바꾸면 음질이 나빠집니다).
       </p>
     </div>
   );

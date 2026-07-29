@@ -1,3 +1,5 @@
+import { getReadyTts } from './geminiTts';
+
 // 상황 시뮬레이션용 음성 출력 — 한국어 TTS + 실패 시 차임 폴백.
 //
 // iOS Safari 제약이 이 파일의 설계를 거의 다 결정한다:
@@ -191,32 +193,36 @@ export interface SpeakHandle {
 }
 
 /**
- * 상황별 말투. 같은 목소리·같은 속도로 전부 읽으면 면접관과 친구가 구분되지 않아
- * 상황 몰입이 깨진다. 사람은 상황에 따라 속도와 높이가 달라진다.
+ * 상황별 말투.
+ *
+ * ⚠️ pitch 는 절대 건드리지 않는다.
+ * TTS 엔진은 속도(rate)보다 음높이(pitch) 변경에 훨씬 취약하고, 특히 신경망 음성
+ * (Google 한국의 등)은 기본 pitch 로 학습돼 있어 조금만 바꿔도 금속성·웅얼거림이 생긴다.
+ * 실제로 pitch 를 0.94~1.06 으로 흔들었더니 "음질이 이상하다"는 피드백이 나왔다.
+ * 상황 구분은 속도만으로도 충분히 느껴진다.
  */
 export interface Prosody {
   rate: number;
   pitch: number;
 }
 
-const SCENARIO_PROSODY: Record<string, Prosody> = {
-  // 점원/직원 — 조금 빠르고 밝게 (응대 말투)
-  'order-cafe':        { rate: 1.06, pitch: 1.04 },
-  'checkout':          { rate: 1.08, pitch: 1.02 },
-  // 격식 있는 자리 — 천천히, 낮게
-  'introduction':      { rate: 0.96, pitch: 0.98 },
-  'interview':         { rate: 0.92, pitch: 0.94 },
-  // 통화 — 또박또박
-  'phone-reservation': { rate: 1.0,  pitch: 1.0  },
-  // 길에서 — 살짝 머뭇거리는 느낌으로 느리게
-  'stranger':          { rate: 0.98, pitch: 1.02 },
-  // 또래 — 빠르고 높게 (편한 말투)
-  'peers':             { rate: 1.14, pitch: 1.06 },
-  'family':            { rate: 1.08, pitch: 1.02 },
+// 속도도 폭을 좁게 잡는다. 크게 벌리면 그것대로 부자연스러워진다.
+const SCENARIO_RATE: Record<string, number> = {
+  'order-cafe':        1.05,   // 응대 말투 — 조금 빠르게
+  'checkout':          1.06,
+  'introduction':      0.97,   // 격식 있는 자리 — 조금 천천히
+  'interview':         0.95,
+  'phone-reservation': 1.0,    // 통화 — 또박또박
+  'stranger':          0.99,
+  'peers':             1.08,   // 또래 — 편하고 빠르게
+  'family':            1.05,
 };
 
 export function prosodyFor(scenarioId?: string): Prosody {
-  return (scenarioId && SCENARIO_PROSODY[scenarioId]) || { rate: 1, pitch: 1 };
+  return {
+    rate: (scenarioId && SCENARIO_RATE[scenarioId]) || 1,
+    pitch: 1,   // 항상 기본값 — 위 주석 참고
+  };
 }
 
 /**
@@ -234,6 +240,7 @@ export function speakPrompt(
 ): SpeakHandle {
   let finished = false;
   let watchdog: number | null = null;
+  let audioEl: HTMLAudioElement | null = null;
 
   const finish = (outcome: SpeechOutcome) => {
     if (finished) return;
@@ -244,6 +251,29 @@ export function speakPrompt(
     }
     onDone(outcome);
   };
+
+  // Gemini 로 만들어 둔 오디오가 있으면 그걸 쓴다 — 사람 목소리에 훨씬 가깝다.
+  // 준비가 안 됐으면 기다리지 않고 바로 아래 브라우저 음성으로 내려간다.
+  const ready = getReadyTts(text);
+  if (ready) {
+    try {
+      audioEl = new Audio(ready);
+      audioEl.onended = () => finish('spoken');
+      audioEl.onerror = () => finish('spoken');
+      // ⚠️ 제스처 안에서 호출되므로 play() 가 허용된다.
+      void audioEl.play().catch(() => finish('spoken'));
+      // 재생이 끝나지 않는 경우를 대비한 안전장치.
+      watchdog = window.setTimeout(() => finish('spoken'), estimateDurationMs(text) + 4000);
+      return {
+        cancel: () => {
+          try { audioEl?.pause(); } catch { /* 무시 */ }
+          finish('spoken');
+        },
+      };
+    } catch {
+      // 아래 브라우저 음성으로 계속
+    }
+  }
 
   const fallback = () => {
     playChime();
