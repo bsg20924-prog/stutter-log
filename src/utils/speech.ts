@@ -32,10 +32,88 @@ export function isSpeechSupported(): boolean {
   );
 }
 
+// 기기에 한국어 음성이 여러 개 있고, 품질 차이가 크다.
+// 예: macOS 는 유나(로컬 기본) 외에 Eddy·Grandma·Rocko 같은 캐릭터 음성이 섞여 있고
+// Chrome 에는 'Google 한국의'(네트워크 신경망)가 있다. 그냥 첫 번째를 고르면
+// 캐릭터 음성이 걸려 상황 연습이 우스워질 수 있다.
+
+/** 이름에 이게 들어가면 캐릭터/노벨티 음성이라 실제 대화용으로 부적합하다. */
+const NOVELTY = [
+  'eddy', 'flo', 'grandma', 'grandpa', 'reed', 'rocko', 'sandy', 'shelley',
+  'bells', 'boing', 'bubbles', 'jester', 'organ', 'superstar', 'trinoids',
+  'whisper', 'wobble', 'zarvox', 'bad news', 'good news',
+];
+
+function isNovelty(name: string): boolean {
+  const n = name.toLowerCase();
+  return NOVELTY.some(k => n.includes(k));
+}
+
+/** 높을수록 좋은 음성. 신경망/고품질 → 기본 로컬 → 캐릭터 순. */
+function voiceScore(v: SpeechSynthesisVoice): number {
+  const n = v.name.toLowerCase();
+  if (isNovelty(v.name)) return -100;           // 캐릭터 음성은 사실상 배제
+  let score = 0;
+  // 네트워크 신경망 음성이 가장 사람에 가깝다 (Google 한국의 등)
+  if (!v.localService) score += 50;
+  if (n.includes('google')) score += 40;
+  if (n.includes('siri')) score += 35;
+  // macOS/iOS 는 고품질 음성을 따로 내려받게 한다
+  if (n.includes('premium') || n.includes('enhanced') || n.includes('neural')) score += 30;
+  if (n.includes('고품질')) score += 30;
+  if (v.default) score += 5;
+  return score;
+}
+
 function findKoreanVoice(): SpeechSynthesisVoice | null {
   if (!isSpeechSupported()) return null;
-  const voices = window.speechSynthesis.getVoices();
-  return voices.find(v => v.lang?.toLowerCase().startsWith('ko')) ?? null;
+  const ko = window.speechSynthesis.getVoices()
+    .filter(v => v.lang?.toLowerCase().startsWith('ko'));
+  if (ko.length === 0) return null;
+
+  // 사용자가 고른 음성이 있으면 그것을 우선한다.
+  const preferred = getPreferredVoiceName();
+  if (preferred) {
+    const hit = ko.find(v => v.name === preferred);
+    if (hit) return hit;
+  }
+
+  const ranked = [...ko].sort((a, b) => voiceScore(b) - voiceScore(a));
+  // 전부 캐릭터 음성뿐이면 그거라도 쓴다(무음보다 낫다).
+  return ranked[0] ?? null;
+}
+
+/** 화면에 보여줄 한국어 음성 목록 (좋은 순). */
+export function listKoreanVoices(): { name: string; natural: boolean }[] {
+  if (!isSpeechSupported()) return [];
+  return window.speechSynthesis.getVoices()
+    .filter(v => v.lang?.toLowerCase().startsWith('ko'))
+    .sort((a, b) => voiceScore(b) - voiceScore(a))
+    .map(v => ({ name: v.name, natural: voiceScore(v) >= 30 }));
+}
+
+const VOICE_STORAGE = 'stutter_tts_voice';
+
+export function getPreferredVoiceName(): string {
+  try {
+    return localStorage.getItem(VOICE_STORAGE) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setPreferredVoiceName(name: string): void {
+  try {
+    if (name) localStorage.setItem(VOICE_STORAGE, name);
+    else localStorage.removeItem(VOICE_STORAGE);
+  } catch {
+    // 무시 — 이번 세션은 자동 선택으로 동작한다.
+  }
+}
+
+/** 지금 쓰이는 음성 이름 (설정 화면 표시용) */
+export function currentVoiceName(): string {
+  return findKoreanVoice()?.name ?? '';
 }
 
 /** 한국어로 읽어 줄 수 있는 상태인지 — 화면에서 미리 안내할 때 쓴다. */
@@ -113,6 +191,35 @@ export interface SpeakHandle {
 }
 
 /**
+ * 상황별 말투. 같은 목소리·같은 속도로 전부 읽으면 면접관과 친구가 구분되지 않아
+ * 상황 몰입이 깨진다. 사람은 상황에 따라 속도와 높이가 달라진다.
+ */
+export interface Prosody {
+  rate: number;
+  pitch: number;
+}
+
+const SCENARIO_PROSODY: Record<string, Prosody> = {
+  // 점원/직원 — 조금 빠르고 밝게 (응대 말투)
+  'order-cafe':        { rate: 1.06, pitch: 1.04 },
+  'checkout':          { rate: 1.08, pitch: 1.02 },
+  // 격식 있는 자리 — 천천히, 낮게
+  'introduction':      { rate: 0.96, pitch: 0.98 },
+  'interview':         { rate: 0.92, pitch: 0.94 },
+  // 통화 — 또박또박
+  'phone-reservation': { rate: 1.0,  pitch: 1.0  },
+  // 길에서 — 살짝 머뭇거리는 느낌으로 느리게
+  'stranger':          { rate: 0.98, pitch: 1.02 },
+  // 또래 — 빠르고 높게 (편한 말투)
+  'peers':             { rate: 1.14, pitch: 1.06 },
+  'family':            { rate: 1.08, pitch: 1.02 },
+};
+
+export function prosodyFor(scenarioId?: string): Prosody {
+  return (scenarioId && SCENARIO_PROSODY[scenarioId]) || { rate: 1, pitch: 1 };
+}
+
+/**
  * 프롬프트를 읽고, 끝나면 onDone(outcome) 을 정확히 한 번 호출한다.
  *
  * ⚠️ 반드시 사용자 터치 핸들러 안에서 **동기적으로** 호출할 것.
@@ -122,6 +229,8 @@ export interface SpeakHandle {
 export function speakPrompt(
   text: string,
   onDone: (outcome: SpeechOutcome) => void,
+  /** 상황 id — 말투(속도·높이)를 맞추는 데 쓴다 */
+  scenarioId?: string,
 ): SpeakHandle {
   let finished = false;
   let watchdog: number | null = null;
@@ -155,8 +264,9 @@ export function speakPrompt(
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.voice = voice;
     utterance.lang = voice.lang || 'ko-KR';
-    utterance.rate = 1;
-    utterance.pitch = 1;
+    const { rate, pitch } = prosodyFor(scenarioId);
+    utterance.rate = rate;
+    utterance.pitch = pitch;
     utterance.onend = () => finish('spoken');
     utterance.onerror = () => {
       // 재생 도중 실패 — 차임으로라도 신호를 준다.

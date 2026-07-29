@@ -16,6 +16,7 @@ import { useLogStore } from '../hooks/useLogStore';
 import { getActiveChallengeWords } from '../utils/challenge';
 import RecordingPressurePanel from './RecordingPressurePanel';
 import GeminiKeySettings from './GeminiKeySettings';
+import VoiceSettings from './VoiceSettings';
 import SoundMapResultView from './SoundMapResultView';
 
 // 상황(4단계)은 카드마다 사다리 안에서 겪는다 — 별도 단계가 아니다.
@@ -337,6 +338,8 @@ function IntroScreen({
           </div>
         )}
       </div>
+
+      <VoiceSettings />
 
       <GeminiKeySettings />
 

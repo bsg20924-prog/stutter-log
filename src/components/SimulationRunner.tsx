@@ -529,7 +529,7 @@ function ScenarioPlayer({
       if (genRef.current !== gen) return;
       setOutcome(result);
       startCountdown(gen);        // (3) 재생이 끝나면 즉시 3-2-1
-    });
+    }, scenario.id);
   }
 
   // 렌더마다 최신 문장을 담아 갱신한다 (ref 대입은 부작용이 없다).

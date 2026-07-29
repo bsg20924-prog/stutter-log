@@ -101,7 +101,7 @@ export default function SituationStep({
       if (genRef.current !== gen) return;
       setOutcome(result);
       startCountdown(gen);
-    });
+    }, assignment.scenarioId);
   }
 
   const ambientMeta = assignment.ambientKey ? AMBIENT_META[assignment.ambientKey] : null;
