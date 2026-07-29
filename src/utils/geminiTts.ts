@@ -13,8 +13,6 @@ const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions'
 const MODEL = 'gemini-3.1-flash-tts-preview';
 const TIMEOUT_MS = 15000;
 
-const ENABLED_KEY = 'stutter_tts_gemini';
-const VOICE_KEY = 'stutter_tts_gemini_voice';
 
 /** 들어보고 고른 것들 — 한국어에서 자연스러운 축 */
 export const GEMINI_VOICES = [
@@ -46,10 +44,8 @@ const SCENARIO_VOICE: Record<string, { voice: string; style: string }> = {
   'family':            { voice: 'Kore',   style: '다정한 가족 반말 말투로' },
 };
 
-/** 사용자가 특정 목소리로 고정했으면 그것, 아니면 상황별 목소리 */
+/** 상황마다 다른 사람이 말한다. */
 export function voiceForScenario(scenarioId?: string): string {
-  const fixed = getFixedVoice();
-  if (fixed) return fixed;
   return (scenarioId && SCENARIO_VOICE[scenarioId]?.voice) || DEFAULT_GEMINI_VOICE;
 }
 
@@ -57,45 +53,8 @@ export function styleForScenario(scenarioId?: string): string {
   return (scenarioId && SCENARIO_VOICE[scenarioId]?.style) || '';
 }
 
-/**
- * AI 음성은 키가 있으면 기본으로 켠다.
- * 브라우저 내장 음성보다 확실히 낫고, 준비가 안 되면 어차피 자동으로 내려가므로
- * 굳이 사용자가 켜야 하는 기능으로 둘 이유가 없다.
- */
-export function isGeminiTtsOn(): boolean {
-  try {
-    return localStorage.getItem(ENABLED_KEY) !== 'off';
-  } catch {
-    return true;
-  }
-}
-
-export function setGeminiTtsOn(on: boolean): void {
-  try {
-    if (on) localStorage.removeItem(ENABLED_KEY);
-    else localStorage.setItem(ENABLED_KEY, 'off');
-  } catch {
-    // 무시
-  }
-}
-
-/** 사용자가 하나로 고정한 목소리 ('' 면 상황별 자동) */
-export function getFixedVoice(): string {
-  try {
-    return localStorage.getItem(VOICE_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-export function setFixedVoice(v: string): void {
-  try {
-    if (v) localStorage.setItem(VOICE_KEY, v);
-    else localStorage.removeItem(VOICE_KEY);
-  } catch {
-    // 무시
-  }
-}
+// 설정으로 두지 않는다. 키가 있으면 항상 AI 음성을 쓰고, 준비가 안 되면
+// 브라우저 음성으로 조용히 내려간다 — 사용자가 고를 이유가 없는 결정이다.
 
 // ── PCM → WAV ────────────────────────────────────────────
 function pcmToWav(base64: string, sampleRate: number, channels: number): Blob {
@@ -190,7 +149,7 @@ async function requestTts(
  * 실패는 조용히 무시한다 — 재생 시점에 브라우저 음성으로 넘어간다.
  */
 export function prefetchTts(text: string, apiKey: string, scenarioId?: string): void {
-  if (!text || !apiKey || !isGeminiTtsOn() || isBackingOff()) return;
+  if (!text || !apiKey || isBackingOff()) return;
   const voice = voiceForScenario(scenarioId);
   const style = styleForScenario(scenarioId);
   const key = cacheKey(text, voice, style);
@@ -206,7 +165,6 @@ export function prefetchTts(text: string, apiKey: string, scenarioId?: string): 
 
 /** 이미 준비된 오디오 URL. 없으면 null — 호출부는 즉시 브라우저 음성으로 간다. */
 export function getReadyTts(text: string, scenarioId?: string): string | null {
-  if (!isGeminiTtsOn()) return null;
   return cache.get(cacheKey(text, voiceForScenario(scenarioId), styleForScenario(scenarioId))) ?? null;
 }
 

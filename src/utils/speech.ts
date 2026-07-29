@@ -67,55 +67,14 @@ function voiceScore(v: SpeechSynthesisVoice): number {
   return score;
 }
 
+// AI 음성을 못 쓸 때의 대체용. 사용자에게 고르게 하지 않고 가장 나은 것을 고른다.
 function findKoreanVoice(): SpeechSynthesisVoice | null {
   if (!isSpeechSupported()) return null;
   const ko = window.speechSynthesis.getVoices()
     .filter(v => v.lang?.toLowerCase().startsWith('ko'));
   if (ko.length === 0) return null;
-
-  // 사용자가 고른 음성이 있으면 그것을 우선한다.
-  const preferred = getPreferredVoiceName();
-  if (preferred) {
-    const hit = ko.find(v => v.name === preferred);
-    if (hit) return hit;
-  }
-
-  const ranked = [...ko].sort((a, b) => voiceScore(b) - voiceScore(a));
   // 전부 캐릭터 음성뿐이면 그거라도 쓴다(무음보다 낫다).
-  return ranked[0] ?? null;
-}
-
-/** 화면에 보여줄 한국어 음성 목록 (좋은 순). */
-export function listKoreanVoices(): { name: string; natural: boolean }[] {
-  if (!isSpeechSupported()) return [];
-  return window.speechSynthesis.getVoices()
-    .filter(v => v.lang?.toLowerCase().startsWith('ko'))
-    .sort((a, b) => voiceScore(b) - voiceScore(a))
-    .map(v => ({ name: v.name, natural: voiceScore(v) >= 30 }));
-}
-
-const VOICE_STORAGE = 'stutter_tts_voice';
-
-export function getPreferredVoiceName(): string {
-  try {
-    return localStorage.getItem(VOICE_STORAGE) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-export function setPreferredVoiceName(name: string): void {
-  try {
-    if (name) localStorage.setItem(VOICE_STORAGE, name);
-    else localStorage.removeItem(VOICE_STORAGE);
-  } catch {
-    // 무시 — 이번 세션은 자동 선택으로 동작한다.
-  }
-}
-
-/** 지금 쓰이는 음성 이름 (설정 화면 표시용) */
-export function currentVoiceName(): string {
-  return findKoreanVoice()?.name ?? '';
+  return [...ko].sort((a, b) => voiceScore(b) - voiceScore(a))[0] ?? null;
 }
 
 /** 한국어로 읽어 줄 수 있는 상태인지 — 화면에서 미리 안내할 때 쓴다. */
