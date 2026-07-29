@@ -6,15 +6,20 @@
 
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { MicOff, HelpCircle, ChevronDown, Check, Timer, Target, Sparkles, Info } from 'lucide-react';
+import {
+  MicOff, HelpCircle, ChevronDown, Check, Timer, Target, Sparkles, Info,
+  MessageSquare, VolumeX,
+} from 'lucide-react';
 import { ko } from 'date-fns/locale';
 import {
   SoundMapResult, SoundMapCardResult,
-  THRESHOLD_META, THRESHOLD_ORDER, summarizeSoundMap,
+  THRESHOLD_META, THRESHOLD_ORDER, summarizeSoundMap, normalizeThresholdCounts,
 } from '../utils/soundMapResult';
+import { summarizeSimulation } from '../utils/simulationResult';
 import { SOUND_GROUPS } from '../data/soundMap';
 import {
-  Prescription, BLOCKAGE_META, buildPrescriptions,
+  Prescription, SimulationPrescription,
+  BLOCKAGE_META, buildPrescriptions, buildSimulationPrescriptions,
 } from '../utils/soundMapPrescription';
 import { ZONES } from '../utils/phonetics';
 import { extractPhoneme } from '../utils/phoneme';
@@ -31,13 +36,18 @@ const NOTE_EVIDENCE = '소리 지도 · 예상보다 잘 나온 증거';
 export default function SoundMapResultView({ result }: { result: SoundMapResult }) {
   const [practice, setPractice] = useState<Strategy | null>(null);
   const [detail, setDetail] = useState<Strategy | null>(null);
-  const t = result.thresholdCounts;
+  // Stage 4 이전에 저장된 지도에는 'simulation' 칸이 없다 — 정규화하지 않으면 산수가 NaN 이 된다.
+  const t = normalizeThresholdCounts(result.thresholdCounts);
   const broken = t.recording + t.normal + t.whisper;
   const present = THRESHOLD_ORDER.filter(k => t[k] > 0);
 
   const overpredictedCards = result.cards.filter(c => c.fearGap === 'over');
   // 저장된 카드에서 매번 파생 — 예전 지도도 처방을 받을 수 있다.
   const prescriptions = buildPrescriptions(result.cards);
+  // 상황에서만 걸린 것은 원인이 달라 따로 묶는다 (Stage 4 를 안 했으면 빈 배열).
+  const simPrescriptions = buildSimulationPrescriptions(
+    result.simulation, result.simulationOnlyWords,
+  );
   // 연습 모달에 넘길 단어: 처방 대상 단어가 없으면 걸린 소리 전체
   const practiceWords = prescriptions.flatMap(p => p.words);
 
@@ -72,6 +82,7 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
 
         <p className="text-xs text-gray-400 mt-3">
           소리 {result.totalCards}개 · 걸림 {broken}개 · 안전 {t.none}개
+          {t.simulation > 0 && ` · 상황 반응 ${t.simulation}개`}
           {t.unknown > 0 && ` · 모르겠음 ${t.unknown}개`}
         </p>
 
@@ -182,6 +193,28 @@ export default function SoundMapResultView({ result }: { result: SoundMapResult 
         </div>
       )}
 
+      {/* ── Stage 4: 상황 시뮬레이션 (건너뛰었으면 통째로 없음) ── */}
+      {result.simulation && <SimulationSummary result={result} />}
+
+      {/* ── 노출 처방: 상황에서만 걸린 것 ── */}
+      {simPrescriptions.length > 0 && (
+        <div className="space-y-3">
+          <div className="px-1">
+            <h3 className="text-sm font-semibold text-gray-700">🎭 상황 노출 처방</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              소리에는 문제가 없고 상황에만 반응한 단어들이에요. 발성이 아니라 노출로 다뤄요.
+            </p>
+          </div>
+          {simPrescriptions.map(p => (
+            <SimulationPrescriptionCard
+              key={p.scenarioId}
+              prescription={p}
+              onDetail={setDetail}
+            />
+          ))}
+        </div>
+      )}
+
       {/* ── 조음 위치 (접힘 · 참고용) ── */}
       {/* 예전에 저장된 결과에는 zoneSamples 가 없을 수 있어 방어적으로 처리 */}
       {(result.zoneSamples ?? 0) > 0 && <ZoneDetails result={result} />}
@@ -287,6 +320,176 @@ function PrescriptionCard({
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Stage 4 결과 요약: 상황별로 몇 문장에서 걸렸는지 ──────────────────
+function SimulationSummary({ result }: { result: SoundMapResult }) {
+  const sim = result.simulation;
+  if (!sim) return null;
+
+  const meta = THRESHOLD_META.simulation;
+  const caughtSentences = sim.sentences.filter(
+    s => s.assessment === 'partial' || s.assessment === 'blocked',
+  );
+
+  // 상황에서 걸렸지만 소리 지도에 같은 단어가 없는 경우.
+  // 이때는 "상황 때문"인지 "원래 어려운 소리"인지 가를 근거가 없어 승격도 처방도 못 한다.
+  // 그냥 조용히 빠지면 사용자는 분명히 걸렸는데 아무 말이 없는 이유를 알 수 없다 — 밝혀서 안내한다.
+  const cardTexts = new Set(result.cards.map(c => c.text.trim().toLowerCase()));
+  const unmatched = sim.caughtWords.filter(w => !cardTexts.has(w.trim().toLowerCase()));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1">
+        <MessageSquare size={15} className="text-gray-400" />
+        상황 시뮬레이션
+      </h3>
+      <p className="text-xs text-gray-500 leading-relaxed mb-3">{summarizeSimulation(sim)}</p>
+
+      {/* 상황별 결과 */}
+      <div className="space-y-3">
+        {sim.scenarios.filter(s => s.total > 0).map(s => {
+          const rate = s.answered > 0 ? Math.round((s.smooth / s.answered) * 100) : 0;
+          return (
+            <div key={s.scenarioId}>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-xs font-medium text-gray-700">{s.label}</span>
+                <span className="text-xs font-semibold text-gray-600">
+                  {s.answered > 0 ? `${rate}%` : '—'}
+                  <span className="text-gray-400 font-normal">
+                    {' '}({s.smooth}/{s.answered} 술술)
+                    {s.unknown > 0 && ` · 모름 ${s.unknown}`}
+                  </span>
+                </span>
+              </div>
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${rate}%`, backgroundColor: THRESHOLD_META.none.color }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 걸린 문장 원문 — 어떤 문장이었는지가 다음 노출 연습의 재료가 된다 */}
+      {caughtSentences.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-100">
+          <p className="text-[11px] font-semibold text-gray-400 mb-2">걸렸던 문장</p>
+          <div className="space-y-1.5">
+            {caughtSentences.map(s => (
+              <div
+                key={s.sentenceId}
+                className="rounded-lg px-2.5 py-2"
+                style={{ backgroundColor: meta.tint }}
+              >
+                <p className="text-xs text-gray-700 break-keep">{s.text}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{s.scenarioLabel}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 소리 지도에 없어서 원인을 가릴 수 없는 단어 */}
+      {unmatched.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <p className="text-[11px] font-semibold text-gray-400 mb-2">아직 원인을 가릴 수 없는 단어</p>
+          <WordChips words={unmatched} color={THRESHOLD_META.unknown.color} />
+          <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+            상황에서 걸렸지만 이 단어들은 압력 사다리로 재보지 않았어요.
+            <b className="text-gray-500"> 상황 때문인지 원래 어려운 소리인지</b> 가르려면,
+            다음 소리 지도를 만들 때 <b className="text-gray-500">‘무서운 단어 추가’</b>에 넣어 주세요.
+          </p>
+        </div>
+      )}
+
+      {/* 음성 없이 진행했다면 근거의 무게를 낮춰 안내한다 */}
+      {sim.fallbackCount > 0 && (
+        <p className="flex items-start gap-1.5 text-[11px] text-gray-400 mt-3 leading-relaxed">
+          <VolumeX size={13} className="shrink-0 mt-0.5" />
+          <span>
+            {sim.fallbackCount}개 문장은 한국어 음성 없이 말풍선으로 진행했어요.
+            실제 상황보다 압박이 약했을 수 있어요.
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── 노출 처방 카드: 상황 × 노출 사다리 ────────────────────────
+function SimulationPrescriptionCard({
+  prescription, onDetail,
+}: {
+  prescription: SimulationPrescription;
+  onDetail: (s: Strategy) => void;
+}) {
+  const meta = THRESHOLD_META.simulation;
+  const strategies = prescription.strategies
+    .map(getStrategy)
+    .filter((s): s is Strategy => Boolean(s));
+
+  return (
+    <div className="rounded-2xl border bg-white overflow-hidden" style={{ borderColor: meta.color }}>
+      <div className="px-4 pt-4 pb-3" style={{ backgroundColor: meta.tint }}>
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: meta.color }} />
+          <span className="text-sm font-semibold text-gray-800">{prescription.headline}</span>
+        </div>
+        <p className="text-xs font-medium text-gray-600 mb-1">상황 — {prescription.scenarioLabel}</p>
+        <p className="text-xs text-gray-600 leading-relaxed mb-3">{prescription.reason}</p>
+        <WordChips words={prescription.words} color={meta.color} />
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {/* 노출 사다리 — 이 처방의 핵심 */}
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 mb-2">노출 사다리 · 위에서부터 차례로</p>
+          <ol className="space-y-1.5">
+            {prescription.exposureSteps.map((s, i) => (
+              <li key={i} className="flex gap-2 text-xs text-gray-600 leading-relaxed">
+                <span className="shrink-0 w-4 h-4 rounded-full bg-gray-100 text-gray-500 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                  {i + 1}
+                </span>
+                <span>{s}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+            각 단계는 <b className="text-gray-500">긴장이 내려갈 때까지</b> 머문 뒤 다음으로 넘어가세요.
+            불안이 높은 상태에서 그만두면 그 상황이 위험하다는 학습만 남아요.
+          </p>
+        </div>
+
+        <div className="pt-1 border-t border-gray-100">
+          <p className="text-[11px] font-semibold text-gray-400 mb-2 mt-2">말하기 직전에 쓸 전략</p>
+          <div className="space-y-2">
+            {strategies.map(s => {
+              const category = STRATEGY_CATEGORIES.find(c => c.id === s.category);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => onDetail(s)}
+                  className="w-full text-left rounded-xl bg-gray-50 px-3 py-2.5 hover:bg-teal-50/60 transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm">{category?.emoji}</span>
+                    <span className="text-sm font-semibold text-gray-800">{s.name}</span>
+                    <Info size={14} className="ml-auto shrink-0 text-gray-300" />
+                  </span>
+                  <span className="block text-xs text-gray-500 leading-relaxed mt-0.5">{s.actionGuide}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <RegisterChallengeAction words={prescription.words} />
       </div>
     </div>
   );

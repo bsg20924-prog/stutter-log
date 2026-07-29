@@ -9,8 +9,13 @@ import { ArticulationZone } from './phonetics';
 import {
   SoundCard, SoundKind, SoundResponse, RecordingMode, BlockageType,
 } from '../data/soundMap';
+import { SimulationResult, caughtWordSet, normalizeWord } from './simulationResult';
 
-export type PressureThreshold = 'none' | 'recording' | 'normal' | 'whisper' | 'unknown';
+// 'simulation' 은 Stage 4(상황 시뮬레이션)에서만 걸린 소리.
+// 녹음보다도 높은 압력에서 깨진 것이므로 사다리에서 none 바로 다음에 온다.
+// Stage 4 를 하지 않은 지도에는 이 등급이 아예 등장하지 않는다.
+export type PressureThreshold =
+  | 'none' | 'simulation' | 'recording' | 'normal' | 'whisper' | 'unknown';
 
 // 심각도 팔레트. scripts/validate_palette.js 로 검증했다(명도대·채도·CVD·일반시야 전부 PASS).
 // Tailwind v4 는 색을 oklch 로 재정의해서 클래스명으로는 검증한 값이 그대로 나온다는 보장이 없다.
@@ -26,6 +31,14 @@ export const THRESHOLD_META: Record<PressureThreshold, {
     color: '#0d9488',
     tint: 'rgba(13,148,136,0.12)',
     desc: '3단계 모두 술술 나온 소리예요.',
+  },
+  // 색상 계열을 일부러 사다리(초록→노랑→빨강)에서 떼어 놨다.
+  // 이 등급은 압력이 한 칸 더 센 게 아니라 원인의 종류가 다르다 — 상황에 조건화된 반응이다.
+  simulation: {
+    label: '상황 반응',
+    color: '#7c3aed',
+    tint: 'rgba(124,58,237,0.12)',
+    desc: '녹음 압박까지 통과했는데 상황 속 문장에서 걸린 소리예요. 소리가 아니라 그 상황이 원인이에요.',
   },
   recording: {
     label: '압박 반응',
@@ -53,7 +66,23 @@ export const THRESHOLD_META: Record<PressureThreshold, {
   },
 };
 
-export const THRESHOLD_ORDER: PressureThreshold[] = ['none', 'recording', 'normal', 'whisper', 'unknown'];
+export const THRESHOLD_ORDER: PressureThreshold[] =
+  ['none', 'simulation', 'recording', 'normal', 'whisper', 'unknown'];
+
+export function emptyThresholdCounts(): Record<PressureThreshold, number> {
+  return { none: 0, simulation: 0, recording: 0, normal: 0, whisper: 0, unknown: 0 };
+}
+
+/**
+ * 저장된 지도의 임계점 카운트를 읽을 때 반드시 통과시킨다.
+ * Stage 4 이전에 저장된 지도에는 'simulation' 칸이 없어서, 그대로 쓰면
+ * undefined 가 산수에 섞여 합계가 NaN 이 된다.
+ */
+export function normalizeThresholdCounts(
+  counts: Partial<Record<PressureThreshold, number>> | undefined,
+): Record<PressureThreshold, number> {
+  return { ...emptyThresholdCounts(), ...(counts ?? {}) };
+}
 
 // 압력 사다리 (낮은 압력 → 높은 압력)
 export type LadderStep = 'whisper' | 'normal' | 'recording';
@@ -64,7 +93,8 @@ export const LADDER_LABEL: Record<LadderStep, string> = {
   recording: '녹음',
 };
 
-// 카드 하나의 압력 임계점.
+// 카드 하나의 압력 임계점 — Stage 1~3(속삭임·목소리·녹음)만 본다.
+// Stage 4 승격은 computeSoundMapResult 에서 이 결과 위에 얹는다.
 export function thresholdOf(r: SoundResponse | undefined): PressureThreshold {
   if (!r) return 'unknown';
   for (const step of LADDER) {
@@ -128,6 +158,11 @@ export interface SoundMapResult {
   unknownWords: string[];            // 판단이 어려웠던 소리
   micCards: number;                  // 실제 마이크 압박이 걸린 카드 수
   manualCards: number;               // 수동(마이크 없이) 압박이었던 카드 수
+
+  // ── Stage 4 (상황 시뮬레이션) — 선택 단계라 없을 수 있다 ──
+  // 이 두 필드가 없으면 Stage 4 를 하지 않은 지도다. 읽는 쪽은 항상 없을 수 있다고 가정할 것.
+  simulation?: SimulationResult;
+  simulationOnlyWords?: string[];    // 1~3단계는 통과했는데 상황에서만 걸린 소리
 }
 
 function emptyZoneBlockage(): Record<ArticulationZone, number> {
@@ -154,26 +189,38 @@ export function isSoundMapComplete(
 export function computeSoundMapResult(
   cards: SoundCard[],
   responses: Record<string, SoundResponse>,
+  // Stage 4 를 건너뛰면 undefined — 이때 결과는 Stage 4 도입 전과 완전히 동일하다.
+  simulation?: SimulationResult,
 ): Omit<SoundMapResult, 'id' | 'createdAt'> {
   const zoneBlockage = emptyZoneBlockage();
-  const thresholdCounts: Record<PressureThreshold, number> = {
-    none: 0, recording: 0, normal: 0, whisper: 0, unknown: 0,
-  };
+  const thresholdCounts = emptyThresholdCounts();
   const pressureSensitiveWords: string[] = [];
   const hardSoundWords: string[] = [];
   const overpredictedWords: string[] = [];
   const unknownWords: string[] = [];
+  const simulationOnlyWords: string[] = [];
+  const caughtInSimulation = caughtWordSet(simulation);
   let micCards = 0;
   let manualCards = 0;
   let zoneSamples = 0;
 
   const cardResults: SoundMapCardResult[] = cards.map(card => {
     const r = responses[card.id];
-    const threshold = thresholdOf(r);
+    const ladderThreshold = thresholdOf(r);
+
+    // Stage 4 승격 — 1~3단계를 '전부' 통과한 소리만 대상이다.
+    // 이미 낮은 압력에서 걸린 소리는 그쪽이 더 근본적인 발견이므로 절대 덮어쓰지 않는다.
+    // (임계점 = 가장 낮은 압력에서 처음 걸린 지점, 이라는 불변식을 지킨다)
+    const threshold: PressureThreshold =
+      ladderThreshold === 'none' && caughtInSimulation.has(normalizeWord(card.text))
+        ? 'simulation'
+        : ladderThreshold;
+
     const fearGap = fearGapOf(r?.fear, threshold);
 
     thresholdCounts[threshold] += 1;
 
+    if (threshold === 'simulation') simulationOnlyWords.push(card.text);
     if (threshold === 'recording') pressureSensitiveWords.push(card.text);
     if (threshold === 'whisper') hardSoundWords.push(card.text);
     if (threshold === 'unknown') unknownWords.push(card.text);
@@ -235,16 +282,24 @@ export function computeSoundMapResult(
     unknownWords,
     micCards,
     manualCards,
+    // Stage 4 를 건너뛰면 두 필드 모두 넣지 않는다 — 예전 지도와 같은 모양이 된다.
+    ...(simulation ? { simulation, simulationOnlyWords } : {}),
   };
 }
 
 // 결과 한 줄 요약
 export function summarizeSoundMap(result: SoundMapResult): string {
-  const { thresholdCounts: t, totalCards } = result;
+  // 예전 지도에는 'simulation' 칸이 없다 — 정규화하지 않으면 합계가 NaN 이 된다.
+  const t = normalizeThresholdCounts(result.thresholdCounts);
+  const { totalCards } = result;
   const broken = t.recording + t.normal + t.whisper;
 
-  if (broken === 0 && t.unknown === 0) {
+  if (broken === 0 && t.unknown === 0 && t.simulation === 0) {
     return `${totalCards}개 소리가 3단계를 모두 통과했어요. 아주 좋아요! 👏`;
+  }
+  // 사다리는 다 통과했는데 상황에서만 걸린 경우 — 원인이 소리가 아니라는 게 핵심 메시지다.
+  if (broken === 0 && t.simulation > 0) {
+    return `압력 사다리는 모두 통과했는데, ${t.simulation}개 소리가 상황 속 문장에서 걸렸어요 — 소리가 아니라 상황이 원인이에요.`;
   }
   if (broken === 0) {
     return '걸린 소리는 없었어요. 판단이 어려웠던 소리만 남아 있어요.';

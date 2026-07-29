@@ -9,11 +9,19 @@ import { useMicPressure, MicPressure } from '../hooks/useMicPressure';
 import {
   SoundMapResult, computeSoundMapResult, isSoundMapComplete,
 } from '../utils/soundMapResult';
+import {
+  SimulationResult, SimSentenceResponse, buildSimulationResult,
+} from '../utils/simulationResult';
+import { SimScenario } from '../data/simulation';
 import { saveSoundMapResult } from '../hooks/useSoundMaps';
+import { useLogStore } from '../hooks/useLogStore';
+import { getActiveChallengeWords } from '../utils/challenge';
 import RecordingPressurePanel from './RecordingPressurePanel';
+import SimulationRunner from './SimulationRunner';
 import SoundMapResultView from './SoundMapResultView';
 
-type Stage = 'intro' | 'card' | 'done';
+// 'simulation'(Stage 4)은 선택 단계다 — 건너뛰면 Stage 4 도입 전과 똑같은 결과가 나온다.
+type Stage = 'intro' | 'card' | 'simulation' | 'done';
 
 export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [stage, setStage] = useState<Stage>('intro');
@@ -23,6 +31,11 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   const [responses, setResponses] = useState<Record<string, SoundResponse>>({});
   const [confirmExit, setConfirmExit] = useState(false);
   const [countdownOn, setCountdownOn] = useState(true);
+  const [simulation, setSimulation] = useState<SimulationResult | undefined>();
+
+  // Stage 4 문장 재료 — 아직 극복하지 못한 도전 단어를 그대로 쓴다.
+  const { entries } = useLogStore();
+  const challengeWords = getActiveChallengeWords(entries).map(c => c.word);
 
   const mic = useMicPressure(countdownOn);
   const { start: micStart, stop: micStop, grantedOnce, didRecordRef } = mic;
@@ -48,10 +61,11 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
     setCardIndex(0);
     setStep(0);
     setResponses({});
+    setSimulation(undefined);
     setStage('card');
   }
 
-  // 다음 단계(또는 다음 카드/완료)로 진행
+  // 다음 단계(또는 다음 카드/상황 시뮬레이션)로 진행
   function advance() {
     if (step < SOUND_STEPS.length - 1) {
       setStep(step + 1);
@@ -59,8 +73,20 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
       setCardIndex(cardIndex + 1);
       setStep(0);
     } else {
-      setStage('done');
+      // 압력 사다리를 마치면 Stage 4 를 제안한다. 건너뛰면 바로 결과로 간다.
+      setStage('simulation');
     }
+  }
+
+  function finishSimulation(
+    scenarios: SimScenario[],
+    simResponses: Record<string, SimSentenceResponse>,
+  ) {
+    const result = buildSimulationResult(scenarios, simResponses);
+    // 한 문장도 평가하지 않았으면 Stage 4 를 안 한 것으로 취급한다 —
+    // 빈 결과를 저장하면 "상황에서 걸린 게 없음"과 "해보지 않음"이 구분되지 않는다.
+    setSimulation(result.sentences.length > 0 ? result : undefined);
+    setStage('done');
   }
 
   function back() {
@@ -93,7 +119,7 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
   }
 
   function requestExit() {
-    if (stage === 'card') setConfirmExit(true);
+    if (stage === 'card' || stage === 'simulation') setConfirmExit(true);
     else onClose();
   }
 
@@ -115,7 +141,9 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
       {/* ── 본문 ── */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-lg mx-auto px-4 py-5">
-          {stage === 'intro' && <IntroScreen onStart={start} />}
+          {stage === 'intro' && (
+            <IntroScreen challengeWords={challengeWords} onStart={start} />
+          )}
 
           {stage === 'card' && card && (
             <CardRunner
@@ -131,8 +159,21 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
             />
           )}
 
+          {stage === 'simulation' && (
+            <SimulationRunner
+              challengeWords={challengeWords}
+              onFinish={finishSimulation}
+              onSkip={() => setStage('done')}
+            />
+          )}
+
           {stage === 'done' && (
-            <DoneScreen cards={cards} responses={responses} onClose={onClose} />
+            <DoneScreen
+              cards={cards}
+              responses={responses}
+              simulation={simulation}
+              onClose={onClose}
+            />
           )}
         </div>
       </main>
@@ -159,7 +200,12 @@ export default function SoundMapTest({ onClose }: { onClose: () => void }) {
 }
 
 // ── 인트로: 소리 세트 안내 + 무서운 단어 추가 ─────────────────
-function IntroScreen({ onStart }: { onStart: (customWords: string[], countdown: boolean) => void }) {
+function IntroScreen({
+  challengeWords, onStart,
+}: {
+  challengeWords: string[];
+  onStart: (customWords: string[], countdown: boolean) => void;
+}) {
   const [custom, setCustom] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [countdown, setCountdown] = useState(true);
@@ -178,7 +224,13 @@ function IntroScreen({ onStart }: { onStart: (customWords: string[], countdown: 
     }
   }
 
-  const remainingSuggestions = SUGGESTED_CUSTOM_WORDS.filter(w => !custom.includes(w));
+  // 실제로 막혔던 도전 단어를 먼저 제안한다.
+  // 이 단어들을 카드로 넣어야 Stage 4 에서 걸렸을 때 "상황 탓인지 소리 탓인지"를 가를 수 있다.
+  // 넣지 않으면 상황에서 걸려도 비교 기준이 없어 처방을 만들 수 없다.
+  const remainingSuggestions = [
+    ...challengeWords.slice(0, 5),
+    ...SUGGESTED_CUSTOM_WORDS,
+  ].filter((w, i, arr) => arr.indexOf(w) === i && !custom.includes(w));
 
   return (
     <div className="space-y-4">
@@ -211,7 +263,10 @@ function IntroScreen({ onStart }: { onStart: (customWords: string[], countdown: 
       {/* 무서운 단어 추가 */}
       <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
         <p className="text-sm font-semibold text-gray-700 mb-1">무서운 단어 추가 <span className="text-gray-400 font-normal">(선택)</span></p>
-        <p className="text-xs text-gray-400 mb-3">이름, 자주 막히는 단어를 넣으면 지도에 함께 담아요.</p>
+        <p className="text-xs text-gray-400 mb-3">
+          이름, 자주 막히는 단어를 넣으면 지도에 함께 담아요.
+          {challengeWords.length > 0 && ' 도전 단어를 넣으면 마지막 상황 단계와 비교할 수 있어요.'}
+        </p>
 
         <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 mb-2">
           <input
@@ -479,10 +534,11 @@ function SpeakInput({
 
 // 완료 화면 — 결과를 계산하고, 완주한 경우에만 저장한 뒤 지도를 보여준다.
 function DoneScreen({
-  cards, responses, onClose,
+  cards, responses, simulation, onClose,
 }: {
   cards: SoundCard[];
   responses: Record<string, SoundResponse>;
+  simulation?: SimulationResult;
   onClose: () => void;
 }) {
   const [result, setResult] = useState<SoundMapResult | null>(null);
@@ -493,7 +549,8 @@ function DoneScreen({
     if (ranRef.current) return;
     ranRef.current = true;
 
-    const computed = computeSoundMapResult(cards, responses);
+    // simulation 이 undefined 면 Stage 4 도입 전과 완전히 같은 결과가 나온다.
+    const computed = computeSoundMapResult(cards, responses, simulation);
     const stamp = () => ({ ...computed, id: 'unsaved', createdAt: new Date().toISOString() });
 
     // 중간에 빠져나온 기록은 저장하지 않는다 (화면에서만 보여줌).
@@ -514,7 +571,7 @@ function DoneScreen({
         setResult(stamp());
         setUnsaved(true);
       });
-  }, [cards, responses]);
+  }, [cards, responses, simulation]);
 
   if (!result) {
     return (

@@ -9,6 +9,7 @@
 import { StrategyId } from '../types';
 import { BlockageType } from '../data/soundMap';
 import { PressureThreshold } from './soundMapResult';
+import { SimulationResult, normalizeWord } from './simulationResult';
 
 export const BLOCKAGE_META: Record<BlockageType, {
   label: string;
@@ -123,4 +124,115 @@ export function buildPrescriptions(
   return [...buckets.values()].sort((a, b) =>
     THRESHOLD_PRIORITY[a.threshold] - THRESHOLD_PRIORITY[b.threshold] ||
     b.words.length - a.words.length);
+}
+
+// ── Stage 4: 상황에서만 걸린 것에 대한 처방 ────────────────────────
+//
+// 왜 위의 buildPrescriptions 를 재사용하지 않는가:
+// 저 함수는 (임계점 × 막힘 유형)으로 묶는다. 그런데 상황에서만 걸리는 것의 원인은
+// 공기·후두·조음이 아니라 그 상황에 조건화된 반응이다 — 막힘 유형으로 묶으면 의미가 없다.
+// 대신 '어느 상황이었는가'로 묶고, 발성 교정이 아니라 노출/둔감화를 처방한다.
+
+// 노출 사다리: 같은 문장을 현실감만 조금씩 올려가며 반복한다.
+// 핵심은 '불안이 내려갈 때까지 머무는 것'이다 — 불안이 높은 상태에서 그만두면
+// 그 상황이 위험하다는 학습만 강화된다.
+const EXPOSURE_LADDER: Record<string, string[]> = {
+  'order-cafe': [
+    '혼자 있을 때 그 문장을 소리 내어 5번 말하기',
+    '거울을 보거나 영상을 켜 놓고 같은 문장 말하기',
+    '한가한 시간대에 실제로 주문해 보기',
+    '붐비는 시간대에 같은 주문 반복하기',
+  ],
+  'introduction': [
+    '혼자서 이름과 소개 문장을 5번 말하기',
+    '스스로를 촬영하며 소개하기',
+    '가까운 사람 한 명 앞에서 소개하기',
+    '처음 만나는 자리에서 먼저 소개하기',
+  ],
+  'phone-reservation': [
+    '통화 문장을 혼자 소리 내어 5번 말하기',
+    '가까운 사람에게 전화해 같은 문장으로 시작하기',
+    '자동응답(ARS) 안내로 걸어 실제 통화 감각 익히기',
+    '실제 가게에 예약 전화 걸기',
+  ],
+};
+
+const DEFAULT_EXPOSURE: string[] = [
+  '혼자 있을 때 그 문장을 소리 내어 5번 말하기',
+  '녹음을 켜고 같은 문장 말하기',
+  '가까운 사람 앞에서 말하기',
+  '실제 상황에서 말하기',
+];
+
+// 상황 반응에는 발성 교정이 아니라 시작 루틴과 회복 루틴을 붙인다.
+// 조음/후두를 건드리는 전략은 원인이 아닌 곳을 고치게 만든다.
+const EXPOSURE_STRATEGIES: StrategyId[] = ['intentional-pause', 'pause-and-release'];
+
+export interface SimulationPrescription {
+  scenarioId: string;
+  scenarioLabel: string;
+  /** 1~3단계는 통과했는데 이 상황에서 걸린 단어 */
+  words: string[];
+  /** 실제로 걸렸던 문장 원문 */
+  sentences: string[];
+  strategies: StrategyId[];
+  headline: string;
+  reason: string;
+  exposureSteps: string[];
+}
+
+const SIMULATION_HEADLINE = '상황에만 반응하는 단계';
+const SIMULATION_REASON =
+  '속삭임도 목소리도 녹음도 통과한 소리인데, 상황이 주어지자 걸렸어요. ' +
+  '소리를 만드는 동작에는 문제가 없다는 뜻이라, 발성을 고치는 대신 ' +
+  '그 상황에 조금씩 익숙해지는 쪽이 맞아요.';
+
+/**
+ * 상황에서만 걸린 단어들을 시나리오별로 묶어 노출 처방을 만든다.
+ *
+ * @param simulation      Stage 4 결과 (없으면 빈 배열)
+ * @param simulationWords 'simulation' 등급으로 승격된 단어 — 1~3단계를 통과한 것만 들어 있다.
+ *                        이 필터가 없으면 원래 어려웠던 소리까지 노출 처방을 받아
+ *                        "발성 연습이 필요한 소리"를 "상황만 익히면 되는 소리"로 오진하게 된다.
+ */
+export function buildSimulationPrescriptions(
+  simulation: SimulationResult | undefined,
+  simulationWords: string[] | undefined,
+): SimulationPrescription[] {
+  if (!simulation) return [];
+
+  const promoted = new Set((simulationWords ?? []).map(normalizeWord).filter(Boolean));
+  if (promoted.size === 0) return [];
+
+  const buckets = new Map<string, SimulationPrescription>();
+
+  for (const s of simulation.sentences) {
+    if (s.assessment !== 'partial' && s.assessment !== 'blocked') continue;
+
+    const words = s.sourceWords.filter(w => promoted.has(normalizeWord(w)));
+    if (words.length === 0) continue;
+
+    const existing = buckets.get(s.scenarioId);
+    if (existing) {
+      for (const w of words) {
+        if (!existing.words.some(x => normalizeWord(x) === normalizeWord(w))) existing.words.push(w);
+      }
+      if (!existing.sentences.includes(s.text)) existing.sentences.push(s.text);
+      continue;
+    }
+
+    buckets.set(s.scenarioId, {
+      scenarioId: s.scenarioId,
+      scenarioLabel: s.scenarioLabel,
+      words: [...new Set(words)],
+      sentences: [s.text],
+      strategies: EXPOSURE_STRATEGIES,
+      headline: SIMULATION_HEADLINE,
+      reason: SIMULATION_REASON,
+      exposureSteps: EXPOSURE_LADDER[s.scenarioId] ?? DEFAULT_EXPOSURE,
+    });
+  }
+
+  // 걸린 단어가 많은 상황부터 — 가장 자주 발목을 잡는 상황을 먼저 다루게 한다.
+  return [...buckets.values()].sort((a, b) => b.words.length - a.words.length);
 }
