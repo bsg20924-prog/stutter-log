@@ -76,21 +76,28 @@ export async function prepareAllVoices(
     return progress;
   }
 
-  // 한 건씩 받으면 70개에 20~30분이 걸린다(건당 5~15초 + 재시도).
+  // ★ 먼저 이미 있는 것을 전부 세고 시작한다.
+  //
+  // 예전에는 받기를 누르면 카운터가 0부터 다시 올라갔다. 이미 받아둔 것도
+  // 순서대로 하나씩 확인하며 세는데, 중간에 없는 대사를 만나면 거기서 수십 초를
+  // 붙잡히는 바람에 화면에는 "37 → 17" 처럼 **숫자가 뒤로 가는** 것으로 보였다.
+  // 받아둔 게 날아간 것으로 읽히는 표시라 반드시 고쳐야 했다.
+  // 겸사겸사 이미 있는 것은 작업 목록에서 아예 빼므로 더 빠르기도 하다.
+  const missing: typeof lines = [];
+  for (const item of lines) {
+    if (await hasStoredTts(item.line, item.scenarioId)) progress.done += 1;
+    else missing.push(item);
+  }
+  onProgress?.({ ...progress });
+
   // 몇 개씩 겹쳐 받아 시간을 줄이되, 폭을 좁게 둔다 — 몰아치면 429 를 맞고
   // 60초 백오프에 걸려 오히려 전체가 멈춘다.
   let cursor = 0;
   const worker = async (): Promise<void> => {
     while (!signal?.aborted) {
       const i = cursor++;
-      if (i >= lines.length) return;
-      const { line, scenarioId } = lines[i];
-
-      if (await hasStoredTts(line, scenarioId)) {
-        progress.done += 1;
-        onProgress?.({ ...progress });
-        continue;
-      }
+      if (i >= missing.length) return;
+      const { line, scenarioId } = missing[i];
 
       let ok = false;
       for (let attempt = 0; attempt <= RETRY_GAPS_MS.length && !ok; attempt++) {

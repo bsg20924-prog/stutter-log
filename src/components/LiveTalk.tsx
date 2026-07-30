@@ -262,7 +262,9 @@ function VoicePrepCard() {
   async function run() {
     const controller = new AbortController();
     abortRef.current = controller;
-    setProgress({ done: 0, total, failed: 0 });
+    // 이미 받아둔 개수에서 이어서 센다. 0 부터 시작하면 시작하자마자
+    // 숫자가 뒤로 가서 "받아둔 게 사라졌다"로 읽힌다.
+    setProgress({ done: ready, total, failed: 0 });
     await prepareAllVoices(setProgress, controller.signal);
     abortRef.current = null;
     setProgress(null);
