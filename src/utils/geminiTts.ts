@@ -11,7 +11,22 @@
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const MODEL = 'gemini-3.1-flash-tts-preview';
-const TIMEOUT_MS = 15000;
+/**
+ * ⚠️ 이 값이 실제 상한이다. 호출부에서 아무리 오래 기다려도 여기서 끊기면 끝이다.
+ *
+ * 15초로 두었다가 오래 헤맸다 — 컴포넌트 쪽 대기만 늘리며 원인을 엉뚱한 데서 찾았고,
+ * 정작 fetch 는 15초에 스스로 abort 되고 있었다. 실측 생성 시간이 5~15초라
+ * 하필 경계에 걸려서 "가끔 되고 대부분 안 되는" 모습으로 보였다.
+ */
+const TIMEOUT_MS = 40000;
+
+/**
+ * preview 모델은 과부하로 500 을 자주 돌려준다
+ * ("currently experiencing high demand" — 실측 확인).
+ * 일시적인 것이라 한 번은 다시 시도해 볼 값어치가 있다. 두 번은 하지 않는다 —
+ * 사람이 기다리는 중이고, 실패하면 브라우저 음성이라는 멀쩡한 대안이 있다.
+ */
+const RETRY_DELAY_MS = 1200;
 
 
 /** 들어보고 고른 것들 — 한국어에서 자연스러운 축 */
@@ -55,6 +70,59 @@ export function styleForScenario(scenarioId?: string): string {
 
 // 설정으로 두지 않는다. 키가 있으면 항상 AI 음성을 쓰고, 준비가 안 되면
 // 브라우저 음성으로 조용히 내려간다 — 사용자가 고를 이유가 없는 결정이다.
+
+// ── 진단 ──────────────────────────────────────────────────
+// 이 모듈은 모든 실패를 null 로 삼키고 브라우저 음성으로 조용히 내려간다.
+// 사용자 입장에서는 그게 맞지만, 개발 중에는 그 침묵 때문에 원인을 볼 수가 없다
+// ("결제까지 했는데 왜 아직 브라우저 음성이냐" — 400 인지 429 인지 응답 구조가
+// 바뀐 건지 화면상 구분이 안 됐다). DEV 에서만 이유를 찍는다.
+function warn(reason: string, detail?: string): void {
+  if (!import.meta.env.DEV) return;
+  console.warn(`[TTS] ${reason}`, detail ?? '');
+}
+
+/** 오류 본문을 읽되, 읽다가 또 실패해서 원인이 가려지지 않게 한다. */
+async function safeText(res: Response): Promise<string> {
+  try {
+    return (await res.text()).slice(0, 600);
+  } catch {
+    return '(본문을 읽지 못함)';
+  }
+}
+
+// ── 응답에서 오디오 찾기 ──────────────────────────────────
+//
+// ⚠️ 오디오가 실려 오는 위치가 한 번 이상 바뀌었다.
+// 문서는 output_audio.data 라고 하는데, 2026-07-29 실측에서는 steps[].content[] 안에
+// 들어 있었다. 어느 쪽이든 받도록 둘 다 훑는다 — 한쪽만 읽으면 API 가 조용히 정리될 때
+// 기능이 통째로 죽고, 실패가 null 로 삼켜져서 "브라우저 음성만 나온다"로만 보인다.
+// 실제로 그 일이 있었다.
+
+interface AudioChunk {
+  data?: string;
+  sample_rate?: number;
+  channels?: number;
+}
+
+interface TtsResponse {
+  output_audio?: AudioChunk;
+  steps?: { content?: AudioChunk[] }[];
+  // 혹시 한 겹 더 감싸는 형태로 바뀌는 경우까지 방어한다.
+  interaction?: { output_audio?: AudioChunk };
+}
+
+function hasData(c: AudioChunk | undefined): c is AudioChunk {
+  return typeof c?.data === 'string' && c.data.length > 0;
+}
+
+function findAudio(data: TtsResponse): AudioChunk | null {
+  const candidates: (AudioChunk | undefined)[] = [
+    data.output_audio,
+    data.interaction?.output_audio,
+    ...(data.steps ?? []).flatMap(s => s.content ?? []),
+  ];
+  return candidates.find(hasData) ?? null;
+}
 
 // ── PCM → WAV ────────────────────────────────────────────
 function pcmToWav(base64: string, sampleRate: number, channels: number): Blob {
@@ -101,6 +169,8 @@ function cacheKey(text: string, voice: string, style: string): string {
 
 async function requestTts(
   text: string, voice: string, style: string, apiKey: string,
+  /** 5xx 를 만났을 때 한 번 더 시도할지 */
+  retry = true,
 ): Promise<string | null> {
   // Gemini TTS 는 자연어로 말투를 지시한다. pitch 파라미터를 흔드는 것과 달리
   // 모델이 의도한 조절 방식이라 음질이 상하지 않는다.
@@ -122,22 +192,32 @@ async function requestTts(
 
     if (res.status === 429) {
       backoffUntil = Date.now() + BACKOFF_MS;
+      warn('429 한도 초과 — 잠시 쉰다', await safeText(res));
       return null;
     }
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await safeText(res);
+      warn(`HTTP ${res.status}`, body);
+      // 과부하(5xx)는 일시적이다 — 딱 한 번만 다시 시도한다.
+      if (res.status >= 500 && retry) {
+        await new Promise(r => window.setTimeout(r, RETRY_DELAY_MS));
+        return requestTts(text, voice, style, apiKey, false);
+      }
+      return null;
+    }
 
-    const data = await res.json() as {
-      steps?: { content?: { data?: string; sample_rate?: number; channels?: number }[] }[];
-    };
-    // 오디오는 steps[].content[] 안에 들어온다 (문서의 output_audio 가 아니다 — 실측 확인).
-    const audio = (data.steps ?? [])
-      .flatMap(s => s.content ?? [])
-      .find(c => typeof c.data === 'string' && c.data.length > 0);
-    if (!audio?.data) return null;
+    const data = await res.json() as TtsResponse;
+    const audio = findAudio(data);
+    if (!audio?.data) {
+      // 응답은 200 인데 오디오가 없다 = 응답 모양이 또 바뀌었다는 뜻이다.
+      warn('200 이지만 오디오가 없음 — 응답 구조 확인 필요', JSON.stringify(data).slice(0, 600));
+      return null;
+    }
 
     const blob = pcmToWav(audio.data, audio.sample_rate ?? 24000, audio.channels ?? 1);
     return URL.createObjectURL(blob);
-  } catch {
+  } catch (e) {
+    warn('요청 실패(네트워크·타임아웃)', String(e));
     return null;
   } finally {
     window.clearTimeout(timer);
