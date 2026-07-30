@@ -17,10 +17,10 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  X, MessagesSquare, Play, Mic, MicOff, Volume2, ChevronRight, Loader2,
+  X, MessagesSquare, Play, Mic, MicOff, Volume2, ChevronRight, Loader2, Download,
 } from 'lucide-react';
 import {
-  LIVE_SCENARIOS, LiveScenario, Turn, NextTurn, UNHEARD, ANSWERED, nextLine, openerFor,
+  LIVE_SCENARIOS, LiveScenario, Turn, NextTurn, UNHEARD, ANSWERED, selectLine, openerFor,
 } from '../utils/liveConversation';
 import { AMBIENT_META } from '../data/simulation';
 import { primeAudio, speakPrompt, cancelSpeech, SpeakHandle } from '../utils/speech';
@@ -30,6 +30,7 @@ import {
   useSpeechRecognition, isSpeechRecognitionSupported,
 } from '../hooks/useSpeechRecognition';
 import { checkAmbientAvailable, createAmbientPlayer, AmbientPlayer } from '../utils/ambient';
+import { countPrepared, prepareAllVoices, PrepareProgress } from '../utils/ttsPrepare';
 
 /**
  * 내 차례의 길이. 상황 시뮬레이션(8초)보다 길게 잡는다 —
@@ -203,6 +204,8 @@ function Intro({
         </div>
       )}
 
+      {aiReady && <VoicePrepCard />}
+
       <div>
         <p className="text-sm font-semibold text-gray-700 mb-2 px-1">어떤 상황을 연습할까요</p>
         <div className="space-y-2">
@@ -225,6 +228,90 @@ function Intro({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 음성 미리 받아두기.
+ *
+ * 이 카드가 이 기능의 안정성을 사실상 결정한다.
+ * 대화 도중에 음성을 만들면 preview 모델의 지연(5~15초)과 과부하(500)를 그대로
+ * 뒤집어쓰고 브라우저 음성으로 떨어진다. 여기서 미리 받아 두면 대화 중에는
+ * 네트워크를 아예 타지 않는다.
+ */
+function VoicePrepCard() {
+  const [stat, setStat] = useState<{ ready: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<PrepareProgress | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void countPrepared().then(s => { if (alive) setStat(s); });
+    return () => {
+      alive = false;
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const running = progress !== null;
+  const ready = progress ? progress.done : stat?.ready ?? 0;
+  const total = progress ? progress.total : stat?.total ?? 0;
+  const allReady = total > 0 && ready >= total;
+
+  async function run() {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setProgress({ done: 0, total, failed: 0 });
+    await prepareAllVoices(setProgress, controller.signal);
+    abortRef.current = null;
+    setProgress(null);
+    setStat(await countPrepared());
+  }
+
+  if (!stat) return null;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-4">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-gray-700">
+        <Download size={15} className="text-gray-400" />
+        상대 목소리 미리 받아두기
+      </p>
+      <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+        {allReady
+          ? '다 받아뒀어요. 대화 중에는 인터넷을 쓰지 않아 목소리가 바로 나와요.'
+          : '한 번만 받아두면 대화가 끊기지 않고 목소리도 바로 나와요. 몇 분 걸려요.'}
+      </p>
+
+      <div className="flex items-center gap-2 mt-3">
+        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${allReady ? 'bg-teal-400' : 'bg-teal-300'}`}
+            style={{ width: total > 0 ? `${(ready / total) * 100}%` : '0%' }}
+          />
+        </div>
+        <span className="shrink-0 text-[11px] text-gray-400 tabular-nums">{ready} / {total}</span>
+      </div>
+
+      {progress && progress.failed > 0 && (
+        <p className="text-[11px] text-amber-600 mt-2">
+          {progress.failed}개는 지금 서버가 바빠서 못 받았어요. 나중에 다시 누르면 그것만 받아요.
+        </p>
+      )}
+
+      {!allReady && (
+        <button
+          onClick={() => { if (running) abortRef.current?.abort(); else void run(); }}
+          className={[
+            'w-full mt-3 rounded-xl py-2.5 text-xs font-semibold transition-colors',
+            running
+              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              : 'bg-teal-500 text-white hover:bg-teal-600',
+          ].join(' ')}
+        >
+          {running ? '그만 받기' : '받아두기'}
+        </button>
+      )}
     </div>
   );
 }
@@ -335,13 +422,18 @@ function Conversation({
   const endMyTurnRef = useRef<() => void | Promise<void>>(() => {});
   // 내 차례를 끝내는 처리가 이미 돌고 있는지 (비동기라 중복 진입이 가능하다)
   const endingRef = useRef(false);
+  // 이번 대화에서 이미 꺼낸 풀 대사 — 같은 말을 두 번 하지 않기 위해서다.
+  const usedRef = useRef<Set<number>>(new Set());
 
   /**
    * 다음 대사를 만들고 음성 생성까지 걸어 둔다.
    * 음성은 기다리지 않는다 — 캐시에 채워두는 것이 목적이다.
    */
   const prepare = useCallback(async (history: Turn[]): Promise<NextTurn> => {
-    const next = await nextLine(scenario, history, openerSeed);
+    const next = await selectLine(scenario, history, usedRef.current, openerSeed);
+    // 고른 것은 즉시 사용 완료로 표시한다 — 안 그러면 같은 말을 두 번 하게 된다.
+    if (next.poolIndex !== undefined) usedRef.current.add(next.poolIndex);
+    // 음성은 대개 미리받기로 이미 보관돼 있어 이 호출이 즉시 끝난다.
     const key = getGeminiKey();
     if (key) prefetchTts(next.line, key, scenario.id);
     return next;
@@ -468,6 +560,7 @@ function Conversation({
     turnsRef.current = [];
     setTurns([]);
     unheardStreakRef.current = 0;
+    usedRef.current = new Set();
     void runThemTurn(gen);
   }
 

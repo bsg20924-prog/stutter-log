@@ -9,6 +9,8 @@
 //
 // 응답은 raw PCM(audio/l16, 24kHz mono 16bit)이라 <audio> 로 바로 못 튼다 — WAV 헤더를 씌운다.
 
+import { loadTtsBlob, saveTtsBlob } from './ttsStore';
+
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const MODEL = 'gemini-3.1-flash-tts-preview';
 /**
@@ -171,7 +173,7 @@ async function requestTts(
   text: string, voice: string, style: string, apiKey: string,
   /** 5xx 를 만났을 때 한 번 더 시도할지 */
   retry = true,
-): Promise<string | null> {
+): Promise<Blob | null> {
   // Gemini TTS 는 자연어로 말투를 지시한다. pitch 파라미터를 흔드는 것과 달리
   // 모델이 의도한 조절 방식이라 음질이 상하지 않는다.
   const prompt = style ? `${style} 말해줘: ${text}` : text;
@@ -214,8 +216,7 @@ async function requestTts(
       return null;
     }
 
-    const blob = pcmToWav(audio.data, audio.sample_rate ?? 24000, audio.channels ?? 1);
-    return URL.createObjectURL(blob);
+    return pcmToWav(audio.data, audio.sample_rate ?? 24000, audio.channels ?? 1);
   } catch (e) {
     warn('요청 실패(네트워크·타임아웃)', String(e));
     return null;
@@ -229,13 +230,27 @@ async function requestTts(
  * 실패는 조용히 무시한다 — 재생 시점에 브라우저 음성으로 넘어간다.
  */
 export function prefetchTts(text: string, apiKey: string, scenarioId?: string): void {
-  if (!text || !apiKey || isBackingOff()) return;
+  if (!text || !apiKey) return;
   const voice = voiceForScenario(scenarioId);
   const style = styleForScenario(scenarioId);
   const key = cacheKey(text, voice, style);
   if (cache.has(key) || inflight.has(key)) return;
 
-  const p = requestTts(text, voice, style, apiKey).then(url => {
+  const p = (async (): Promise<string | null> => {
+    // ★ 먼저 영구 보관함을 본다. 여기서 맞으면 요청 자체가 없다 —
+    // 돈도 안 들고, preview 모델의 과부하·지연도 통째로 비껴간다.
+    const stored = await loadTtsBlob(key);
+    if (stored) return URL.createObjectURL(stored);
+
+    // 백오프 판정은 실제로 네트워크를 쓸 때만 한다.
+    // 위에서 걸러졌으면 한도와 무관하게 재생할 수 있어야 한다.
+    if (isBackingOff()) return null;
+
+    const blob = await requestTts(text, voice, style, apiKey);
+    if (!blob) return null;
+    void saveTtsBlob(key, blob);   // 실패해도 이번 세션은 메모리 캐시로 돈다
+    return URL.createObjectURL(blob);
+  })().then(url => {
     inflight.delete(key);
     if (url) cache.set(key, url);
     return url;
@@ -261,6 +276,35 @@ export async function generateTts(
 
   prefetchTts(text, apiKey, scenarioId);
   return inflight.get(key) ?? null;
+}
+
+// ── 미리 받아두기 ─────────────────────────────────────────
+//
+// 대화 도중에 음성을 만드는 것은 성립하지 않는다(모듈 상단 주석 참고).
+// 고정 대사는 미리 한 번만 받아 영구 보관하고, 그 뒤로는 네트워크를 타지 않는다.
+
+/** 이 대사의 음성이 이미 보관돼 있는지. */
+export async function hasStoredTts(text: string, scenarioId?: string): Promise<boolean> {
+  const key = cacheKey(text, voiceForScenario(scenarioId), styleForScenario(scenarioId));
+  if (cache.has(key)) return true;
+  return (await loadTtsBlob(key)) !== null;
+}
+
+/**
+ * 이 대사의 음성을 확보한다. 이미 있으면 아무 것도 하지 않는다.
+ * 대화 중이 아니라 준비 단계에서 부르는 것이라 오래 걸려도 된다.
+ *
+ * @returns 확보 성공 여부
+ */
+export async function ensureTts(
+  text: string, apiKey: string, scenarioId?: string,
+): Promise<boolean> {
+  if (!text || !apiKey) return false;
+  if (await hasStoredTts(text, scenarioId)) return true;
+  prefetchTts(text, apiKey, scenarioId);
+  const key = cacheKey(text, voiceForScenario(scenarioId), styleForScenario(scenarioId));
+  const url = await (inflight.get(key) ?? Promise.resolve(null));
+  return url !== null;
 }
 
 /** 목소리를 바꾸면 이전 목소리로 만든 캐시는 쓸모없다. */
