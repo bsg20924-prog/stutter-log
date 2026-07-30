@@ -10,7 +10,7 @@
 // 한 건씩 순서대로, 실패하면 다시 시도하며 천천히 받는다.
 
 import { allScenarioLines } from './liveConversation';
-import { ensureTts, hasStoredTts } from './geminiTts';
+import { ensureTts, hasStoredTts, isBackingOff } from './geminiTts';
 import { getGeminiKey } from './gemini';
 
 export interface PrepareProgress {
@@ -25,16 +25,26 @@ export interface PrepareProgress {
  */
 const GAP_MS = 400;
 
-/** 과부하(500)는 흔하다 — 건당 두 번까지 다시 시도한다. */
-const ATTEMPTS = 3;
-const RETRY_GAP_MS = 2500;
+/**
+ * 과부하(500)가 흔해서 실측상 절반 가까이 실패한다. 넉넉하게 다시 시도한다.
+ * 여기는 사람이 대화를 기다리는 자리가 아니라, 오래 걸려도 끝나는 편이 낫다.
+ * 간격을 점점 늘린다 — 바쁜 서버를 같은 박자로 두드려 봐야 같이 실패한다.
+ */
+const RETRY_GAPS_MS = [2000, 5000, 10000, 20000];
 
 /**
  * 동시에 받는 개수.
  * 건당 5~15초라 한 줄로 받으면 70개에 20~30분이 걸린다.
- * 3으로 두면 대략 1/3 로 줄면서도 429 를 부르지 않는 선이다.
+ * 다만 폭을 넓히면 429 를 부르고, 그러면 60초 백오프로 전체가 멈춘다.
  */
-const CONCURRENCY = 3;
+const CONCURRENCY = 2;
+
+/** 429 백오프가 풀릴 때까지 기다린다. 이때의 실패는 '실패'가 아니라 '아직'이다. */
+async function waitOutBackoff(signal?: AbortSignal): Promise<void> {
+  while (isBackingOff() && !signal?.aborted) {
+    await sleep(3000);
+  }
+}
 
 /** 이미 몇 개가 준비돼 있는지. 진행률 표시용. */
 export async function countPrepared(): Promise<{ ready: number; total: number }> {
@@ -83,9 +93,12 @@ export async function prepareAllVoices(
       }
 
       let ok = false;
-      for (let attempt = 0; attempt < ATTEMPTS && !ok; attempt++) {
+      for (let attempt = 0; attempt <= RETRY_GAPS_MS.length && !ok; attempt++) {
         if (signal?.aborted) return;
-        if (attempt > 0) await sleep(RETRY_GAP_MS);
+        if (attempt > 0) await sleep(RETRY_GAPS_MS[attempt - 1]);
+        // 429 중에 던지면 요청도 못 나가고 시도 횟수만 태운다.
+        await waitOutBackoff(signal);
+        if (signal?.aborted) return;
         ok = await ensureTts(line, key, scenarioId);
       }
 
