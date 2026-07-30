@@ -213,8 +213,19 @@ export async function prepareAllVoices(
     Array.from({ length: CONCURRENCY }, (_, slot) => worker(slot)),
   );
 
+  // ★ 끝난 뒤에도 '왜 다 못 받았는지'가 남아야 한다.
+  // 예전에는 여기서 빈 문자열로 지웠는데, 호출부가 진행 상태를 비우면서
+  // 실패 안내까지 같이 사라졌다. 사용자에게는 "69/70 에서 이유 없이 멈춤"으로 보였다.
   progress.active = 0;
-  progress.note = signal?.aborted ? '' : '';
+  if (signal?.aborted) {
+    progress.note = '멈췄어요. 다시 누르면 남은 것부터 이어받아요.';
+  } else if (progress.quotaExhausted) {
+    progress.note = '오늘 쓸 수 있는 양을 다 썼어요.';
+  } else if (progress.failed > 0) {
+    progress.note = `${progress.failed}개를 못 받았어요. 다시 누르면 그것만 받아요.`;
+  } else {
+    progress.note = '';
+  }
   emit();
   return progress;
 }

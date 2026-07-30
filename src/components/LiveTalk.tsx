@@ -244,6 +244,8 @@ function VoicePrepCard() {
   const [stat, setStat] = useState<{ ready: number; total: number } | null>(null);
   const [progress, setProgress] = useState<PrepareProgress | null>(null);
   const [stopping, setStopping] = useState(false);
+  // 받기가 끝난 뒤에도 남겨 두는 결과 — 왜 다 못 받았는지 사라지면 안 된다.
+  const [lastResult, setLastResult] = useState<PrepareProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -267,8 +269,11 @@ function VoicePrepCard() {
     // 숫자가 뒤로 가서 "받아둔 게 사라졌다"로 읽힌다.
     setProgress({ done: ready, total, failed: 0, active: 0, note: '확인하는 중...' });
     setStopping(false);
-    await prepareAllVoices(setProgress, controller.signal);
+    const result = await prepareAllVoices(setProgress, controller.signal);
     abortRef.current = null;
+    // 진행 상태는 비우되 **결과는 남긴다.**
+    // 예전에는 같이 지워져서 "69/70 에서 이유 없이 멈춤"으로 보였다.
+    setLastResult(result);
     setProgress(null);
     setStopping(false);
     setStat(await countPrepared());
@@ -326,6 +331,13 @@ function VoicePrepCard() {
         할당량 소진은 '나중에 다시'로 안내하면 안 된다 — 기다린다고 풀리지 않는다.
         무엇을 확인해야 하는지까지 말해 줘야 사용자가 헤매지 않는다.
       */}
+      {/* 끝난 뒤에도 왜 다 못 받았는지 남겨 둔다 */}
+      {!progress && !allReady && lastResult && lastResult.note && (
+        <p className="text-[11px] text-amber-600 mt-2 leading-relaxed">
+          {lastResult.note}
+        </p>
+      )}
+
       {progress?.quotaExhausted ? (
         <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 mt-2">
           <p className="text-[11px] font-semibold text-amber-800">
