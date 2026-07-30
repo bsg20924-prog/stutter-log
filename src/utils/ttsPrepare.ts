@@ -11,7 +11,9 @@
 // 고장으로 읽힌다(실제로 그렇게 보였다).
 
 import { allScenarioLines } from './liveConversation';
-import { ensureTts, hasStoredTts, isBackingOff } from './geminiTts';
+import {
+  ensureTts, hasStoredTts, isBackingOff, isQuotaExhausted, resetQuotaFlag,
+} from './geminiTts';
 import { getGeminiKey } from './gemini';
 
 export interface PrepareProgress {
@@ -22,6 +24,8 @@ export interface PrepareProgress {
   active: number;
   /** 지금 무슨 일이 일어나는 중인지 — 화면에 그대로 보여준다 */
   note: string;
+  /** 할당량 소진. 기다려도 안 풀리므로 재시도를 권하면 안 된다. */
+  quotaExhausted?: boolean;
 }
 
 /** 한 건 끝나고 다음까지의 간격 */
@@ -93,6 +97,9 @@ export async function prepareAllVoices(
   };
   const emit = () => onProgress?.({ ...progress });
 
+  // 지난번 소진 표시를 들고 시작하면 눌러도 아무 것도 안 한다.
+  resetQuotaFlag();
+
   if (!key) {
     progress.note = '연결된 AI 키가 없어요.';
     emit();
@@ -128,6 +135,8 @@ export async function prepareAllVoices(
       let ok = false;
       for (let attempt = 0; attempt <= RETRY_GAPS_MS.length && !ok; attempt++) {
         if (signal?.aborted) break;
+        // 할당량이 마르면 재시도는 시간 낭비다 — 여기서 접는다.
+        if (isQuotaExhausted()) break;
 
         if (attempt > 0) {
           progress.note = `다시 시도하는 중 (${attempt}/${RETRY_GAPS_MS.length})`;
@@ -150,6 +159,13 @@ export async function prepareAllVoices(
       progress.active -= 1;
       if (ok) progress.done += 1;
       else if (!signal?.aborted) progress.failed += 1;
+
+      if (isQuotaExhausted()) {
+        progress.note = '오늘 쓸 수 있는 양을 다 썼어요.';
+        progress.quotaExhausted = true;
+        emit();
+        return;
+      }
       progress.note = signal?.aborted ? '멈추는 중...' : `${missing.length - cursor}개 남았어요.`;
       emit();
 

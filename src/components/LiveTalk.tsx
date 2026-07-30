@@ -320,7 +320,21 @@ function VoicePrepCard() {
         </p>
       )}
 
-      {progress && progress.failed > 0 && (
+      {/*
+        할당량 소진은 '나중에 다시'로 안내하면 안 된다 — 기다린다고 풀리지 않는다.
+        무엇을 확인해야 하는지까지 말해 줘야 사용자가 헤매지 않는다.
+      */}
+      {progress?.quotaExhausted ? (
+        <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 mt-2">
+          <p className="text-[11px] font-semibold text-amber-800">
+            AI 사용 한도를 다 썼어요.
+          </p>
+          <p className="text-[11px] text-amber-700 leading-relaxed mt-0.5">
+            기다린다고 풀리지 않아요. 결제가 이 API 키의 프로젝트에 연결돼 있는지
+            확인해 주세요. 한도가 갱신된 뒤에 다시 누르면 남은 것만 받아요.
+          </p>
+        </div>
+      ) : progress && progress.failed > 0 && (
         <p className="text-[11px] text-amber-600 mt-1">
           {progress.failed}개는 서버가 바빠서 못 받았어요. 다시 누르면 그것만 받아요.
         </p>

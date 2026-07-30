@@ -168,6 +168,22 @@ export function isBackingOff(): boolean {
   return Date.now() < backoffUntil;
 }
 
+/**
+ * 할당량을 다 썼는지. 이건 기다린다고 풀리지 않는다 —
+ * 요금제/결제를 확인하거나 한도가 갱신되기를 기다려야 한다.
+ * 이 상태에서는 더 던지지 말고 사용자에게 사실대로 알려야 한다.
+ */
+let quotaExhausted = false;
+
+export function isQuotaExhausted(): boolean {
+  return quotaExhausted;
+}
+
+/** 사용자가 다시 시도하겠다고 할 때 (키를 바꿨거나 하루가 지났거나) */
+export function resetQuotaFlag(): void {
+  quotaExhausted = false;
+}
+
 // 말투가 다르면 같은 문장이라도 다른 오디오다 — 키에 함께 넣는다.
 function cacheKey(text: string, voice: string, style: string): string {
   return `${voice}|${style}|${text}`;
@@ -197,8 +213,19 @@ async function requestTts(
     });
 
     if (res.status === 429) {
+      const body = await safeText(res);
+      // ⚠️ 429 에는 성격이 다른 두 가지가 섞여 있고, 대응이 정반대다.
+      //   · 분당 호출 제한 → 잠깐 쉬면 풀린다
+      //   · 할당량 소진("exceeded your current quota") → 기다려도 안 풀린다.
+      //     이걸 재시도하면 시간만 태우고, 화면에는 "서버가 바빠서"라는
+      //     틀린 안내가 뜬다. 실제로 그 상태로 한참 헤맸다.
+      if (/exceeded your current quota|check your plan and billing/i.test(body)) {
+        quotaExhausted = true;
+        warn('할당량 소진 — 재시도해도 소용없다', body);
+        return null;
+      }
       backoffUntil = Date.now() + BACKOFF_MS;
-      warn('429 한도 초과 — 잠시 쉰다', await safeText(res));
+      warn('429 분당 한도 — 잠시 쉰다', body);
       return null;
     }
     if (!res.ok) {
