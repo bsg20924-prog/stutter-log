@@ -62,9 +62,20 @@ export interface SpeechRecognitionHandle {
   denied: boolean;
   /** 듣기 시작. 이전 결과는 지운다. */
   start: () => void;
-  /** 듣기 종료 후 확정된 전체 발화를 돌려준다. 못 알아들었으면 빈 문자열. */
-  stop: () => string;
+  /**
+   * 듣기를 멈추고 **최종 결과가 도착할 때까지 기다렸다가** 돌려준다.
+   * 못 알아들었으면 빈 문자열.
+   *
+   * ⚠️ 반드시 기다려야 한다. stop() 직후에 값을 읽으면 안 된다.
+   * iOS 사파리는 중간 결과를 주지 않고 최종 결과만 stop() 뒤에 비동기로 보낸다.
+   * 동기로 읽으면 아이폰에서는 **항상 빈 문자열**이 나온다(실제로 그랬다).
+   * 데스크톱 크롬은 중간 결과가 계속 쌓여서 우연히 값이 차 있었을 뿐이다.
+   */
+  stop: () => Promise<string>;
 }
+
+/** 최종 결과를 기다리는 상한. 이 안에 안 오면 못 알아들은 것으로 친다. */
+const FINAL_RESULT_WAIT_MS = 1500;
 
 export function useSpeechRecognition(enabled: boolean): SpeechRecognitionHandle {
   const [listening, setListening] = useState(false);
@@ -76,6 +87,8 @@ export function useSpeechRecognition(enabled: boolean): SpeechRecognitionHandle 
   const finalRef = useRef('');
   // 응답 창이 열려 있는 동안만 자동 재시작한다.
   const wantListeningRef = useRef(false);
+  // stop() 이 최종 결과를 기다리는 중일 때, onend 가 여기로 결과를 넘긴다.
+  const settleRef = useRef<((said: string) => void) | null>(null);
 
   const build = useCallback((): SRInstance | null => {
     const Ctor = getConstructor();
@@ -116,6 +129,7 @@ export function useSpeechRecognition(enabled: boolean): SpeechRecognitionHandle 
     rec.onend = () => {
       // ★ 침묵으로 끊긴 것을 되살린다.
       // 막히는 동안의 침묵 때문에 인식이 죽으면, 정작 받아야 할 발화를 놓친다.
+      // (여기서는 훅의 start() 가 아니라 rec.start() 를 부른다 — finalRef 를 지우면 안 된다.)
       if (wantListeningRef.current) {
         try {
           rec.start();
@@ -125,6 +139,8 @@ export function useSpeechRecognition(enabled: boolean): SpeechRecognitionHandle 
         }
       }
       setListening(false);
+      // stop() 이 기다리고 있으면 지금이 결과가 다 모인 시점이다.
+      settleRef.current?.(finalRef.current.trim());
     };
     return rec;
   }, []);
@@ -146,22 +162,33 @@ export function useSpeechRecognition(enabled: boolean): SpeechRecognitionHandle 
     }
   }, [enabled, denied, build]);
 
-  const stop = useCallback((): string => {
+  const stop = useCallback((): Promise<string> => {
     wantListeningRef.current = false;
     const rec = recRef.current;
-    if (rec) {
+    if (!rec) return Promise.resolve('');
+
+    return new Promise<string>(resolve => {
+      let settled = false;
+      const finish = (said: string) => {
+        if (settled) return;
+        settled = true;
+        settleRef.current = null;
+        finalRef.current = '';
+        setPartial('');
+        resolve(said);
+      };
+      settleRef.current = finish;
+
       try {
         rec.stop();
       } catch {
-        // 무시
+        finish('');
+        return;
       }
-    }
-    setListening(false);
-    const said = finalRef.current.trim() || partial.trim();
-    finalRef.current = '';
-    setPartial('');
-    return said;
-  }, [partial]);
+      // onend 가 오지 않는 경우가 있다 — 그때도 진행은 멈추면 안 된다.
+      window.setTimeout(() => finish(finalRef.current.trim()), FINAL_RESULT_WAIT_MS);
+    });
+  }, []);
 
   // 화면을 벗어나면 마이크를 반드시 놓는다.
   useEffect(() => () => {

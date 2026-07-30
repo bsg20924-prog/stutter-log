@@ -332,7 +332,9 @@ function Conversation({
     turnsRef.current.map(t => ({ who: t.who, text: t.text }));
 
   // 내 차례를 끝내는 유일한 경로. 시간 만료·「다 말했어요」 둘 다 여기를 지난다.
-  const endMyTurnRef = useRef<() => void>(() => {});
+  const endMyTurnRef = useRef<() => void | Promise<void>>(() => {});
+  // 내 차례를 끝내는 처리가 이미 돌고 있는지 (비동기라 중복 진입이 가능하다)
+  const endingRef = useRef(false);
 
   /**
    * 다음 대사를 만들고 음성 생성까지 걸어 둔다.
@@ -422,11 +424,18 @@ function Conversation({
   }, [scenario, openerSeed, pushTurn, startMyTurn, clearTimer]);
 
   // 렌더마다 최신 상태를 담아 갱신한다.
-  endMyTurnRef.current = () => {
+  endMyTurnRef.current = async () => {
+    // 인식 결과를 기다리는 동안 「다 말했어요」를 또 누르면 턴이 두 번 쌓인다.
+    if (endingRef.current) return;
+    endingRef.current = true;
+
     const gen = genRef.current;
     clearTimer();
     ambientRef.current?.duck();
-    const said = sttRef.current.stop();
+    // ⚠️ 반드시 기다린다. iOS 는 최종 인식 결과를 stop() 뒤에 비동기로 준다.
+    const said = await sttRef.current.stop();
+    endingRef.current = false;
+    if (genRef.current !== gen) return;
 
     let text: string;
     let unheard = false;
