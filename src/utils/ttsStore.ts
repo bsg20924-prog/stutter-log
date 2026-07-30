@@ -25,13 +25,28 @@ const STORE = 'audio';
  */
 const MAX_ENTRIES = 300;
 
+/**
+ * ⚠️ 오디오를 **Blob 이 아니라 ArrayBuffer 로** 보관한다.
+ *
+ * iOS 사파리는 IndexedDB 에 넣었다 꺼낸 Blob 이 깨진다 — MIME 타입이 날아가거나
+ * 데이터에 접근이 안 되고, 재생하면 `NotSupportedError` 가 난다.
+ * 맥에서는 멀쩡한데 아이폰에서만 소리가 아예 안 나는 원인이 이것이었다.
+ *
+ * 바이트로 두고 **읽을 때마다 타입을 명시해 Blob 을 새로 만들면** 이 문제가 사라진다.
+ */
 interface TtsRecord {
   /** geminiTts 의 cacheKey — `voice|style|text` */
   key: string;
-  blob: Blob;
+  /** 오디오 원본 바이트 */
+  buf?: ArrayBuffer;
+  mime?: string;
+  /** 예전 형식(Blob 직접 저장). 읽을 때 바이트로 되살려 쓴다. */
+  blob?: Blob;
   /** 마지막으로 쓴 시각 (ISO) — 정리할 때 오래된 것부터 버린다 */
   usedAt: string;
 }
+
+const MIME = 'audio/wav';
 
 export function isTtsStoreSupported(): boolean {
   return typeof indexedDB !== 'undefined';
@@ -75,15 +90,33 @@ function tx<T>(
   }));
 }
 
-/** 보관된 음성. 없으면 null. 꺼낼 때 사용 시각을 갱신한다. */
+/**
+ * 보관된 음성. 없으면 null.
+ *
+ * ★ 꺼낸 바이트로 **Blob 을 새로 만들어** 돌려준다. 저장돼 있던 Blob 을 그대로
+ * 돌려주면 iOS 에서 재생이 NotSupportedError 로 막힌다(위 주석 참고).
+ */
 export async function loadTtsBlob(key: string): Promise<Blob | null> {
   try {
     const rec = await tx<TtsRecord | undefined>('readonly', s => s.get(key));
-    if (!rec?.blob) return null;
-    // 갱신은 실패해도 무방하다 — 정리 순서만 조금 어긋난다.
-    void tx('readwrite', s => s.put({ ...rec, usedAt: new Date().toISOString() }))
-      .catch(() => {});
-    return rec.blob;
+    if (!rec) return null;
+
+    let buf = rec.buf;
+    if (!buf && rec.blob) {
+      // 예전 형식 — 바이트로 되살리고, 다음부터는 안전한 형식으로 쓴다.
+      buf = await rec.blob.arrayBuffer();
+      void tx('readwrite', s => s.put({
+        key, buf, mime: rec.blob?.type || MIME, usedAt: new Date().toISOString(),
+      })).catch(() => {});
+    }
+    if (!buf || buf.byteLength === 0) return null;
+
+    if (rec.buf) {
+      // 갱신은 실패해도 무방하다 — 정리 순서만 조금 어긋난다.
+      void tx('readwrite', s => s.put({ ...rec, usedAt: new Date().toISOString() }))
+        .catch(() => {});
+    }
+    return new Blob([buf], { type: rec.mime || MIME });
   } catch {
     return null;
   }
@@ -92,7 +125,10 @@ export async function loadTtsBlob(key: string): Promise<Blob | null> {
 /** 음성을 보관한다. 실패해도 조용히 넘어간다 — 메모리 캐시로는 계속 동작한다. */
 export async function saveTtsBlob(key: string, blob: Blob): Promise<void> {
   try {
-    await tx('readwrite', s => s.put({ key, blob, usedAt: new Date().toISOString() }));
+    const buf = await blob.arrayBuffer();
+    await tx('readwrite', s => s.put({
+      key, buf, mime: blob.type || MIME, usedAt: new Date().toISOString(),
+    }));
     void pruneIfNeeded();
   } catch {
     // 용량 초과·프라이빗 모드 등 — 무시한다.
@@ -123,7 +159,7 @@ export async function ttsStoreStats(): Promise<{ count: number; bytes: number }>
     const all = await tx<TtsRecord[]>('readonly', s => s.getAll());
     return {
       count: all.length,
-      bytes: all.reduce((n, r) => n + (r.blob?.size ?? 0), 0),
+      bytes: all.reduce((n, r) => n + (r.buf?.byteLength ?? r.blob?.size ?? 0), 0),
     };
   } catch {
     return { count: 0, bytes: 0 };
