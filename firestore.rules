@@ -33,6 +33,13 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
+    // 대화 세션 + 사후 기록(막힌 단어·음절, 힘주기).
+    // 여기에도 오디오는 없다 — 대화 중 소리는 저장하지 않는다.
+    // 저장된 문서 = 사후 기록을 마친 세션이다 (src/utils/conversationSession.ts 참고).
+    match /conversations/{docId} {
+      allow read, write: if isOwner();
+    }
+
     // 앱 설정(기기 간 동기화). Gemini API 키가 여기 들어간다.
     //
     // ⚠️ 키를 프론트엔드 번들에 넣지 않는 이유가 바로 이 규칙이다:

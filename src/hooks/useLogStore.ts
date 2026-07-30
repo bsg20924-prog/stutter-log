@@ -8,7 +8,7 @@ import {
   setDoc, deleteDoc, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { LogEntry, LogStatus, OutcomeTag, TacticTag } from '../types';
+import { LogEntry, LogSource, LogStatus, OutcomeTag, TacticTag } from '../types';
 import { VALID_TACTIC_IDS } from '../data/strategies';
 
 const SITUATION_MAP: Record<string, LogEntry['situations'][number]> = {
@@ -57,6 +57,18 @@ function migrateOutcome(raw: unknown): LogEntry['outcome'] {
   return (OUTCOME_MAP[s] ?? s) as LogEntry['outcome'];
 }
 
+/**
+ * 출처가 없는 기존 기록은 전부 'real' 이다 — 이 필드가 생기기 전의 기록은
+ * QuickLog 와 상세 기록, 즉 실전 경로에서만 나왔기 때문이다.
+ *
+ * 'simulation' 만 명시적으로 통과시키고 나머지는(없음·오타·쓰레기) 전부 'real' 로 떨군다.
+ * 반대로 짜면 값이 깨진 기록이 조용히 연습으로 분류되어 실전 지표에서 빠진다 —
+ * 지표가 작아지는 쪽의 고장은 눈에 띄지 않아서 더 나쁘다.
+ */
+function migrateSource(raw: unknown): LogSource {
+  return raw === 'simulation' ? 'simulation' : 'real';
+}
+
 function migrate(data: Record<string, unknown>): LogEntry {
   const rawSituations: unknown[] = Array.isArray(data.situations)
     ? data.situations
@@ -101,6 +113,7 @@ function migrate(data: Record<string, unknown>): LogEntry {
     situations:      rawSituations.map(migrateSituation),
     outcome,
     status,
+    source:          migrateSource(data.source),
     isDetailed:      Boolean(data.isDetailed ?? false),
     physicalState:   data.physicalState ? String(data.physicalState) : undefined,
     emotionalState:  data.emotionalState ? String(data.emotionalState) : undefined,

@@ -56,6 +56,21 @@ export type OutcomeTag =
   | '중간에_포기함'
   | '아예_회피함';
 
+/**
+ * 이 기록이 어디서 나왔나.
+ *
+ * 'real'       — 실전(QuickLog·상세 기록). 직면율·상대 반응 등
+ *                공포 학습 지표는 이 기록으로만 계산한다 (CLAUDE.md 0장).
+ *                시뮬레이션 성과로 실전 지표를 채우면 이 앱은
+ *                "AI 와 잘 말하는 능력"을 재는 물건이 된다.
+ * 'simulation' — 연습(대화 세션 사후 기록).
+ *
+ * ⚠️ liveConversation.ts 의 `source: 'ai'|'ladder'`(대사를 누가 골랐나),
+ *    weeklyNarrative.ts 의 `source: 'gemini'|'template'`(문장을 누가 썼나)와는
+ *    이름만 같고 뜻이 전혀 다른 별개 필드다.
+ */
+export type LogSource = 'simulation' | 'real';
+
 export interface LogEntry {
   id: string;
   createdAt: string;
@@ -70,6 +85,12 @@ export interface LogEntry {
   outcome: OutcomeTag | '';   // 빠른 저장 시 빈 문자열
 
   status: LogStatus;
+  /**
+   * optional 이지만 **읽는 쪽에서는 항상 채워져 있다** —
+   * useLogStore.migrate 가 status 와 똑같이 모든 기록에 넣어 준다.
+   * optional 인 것은 저장하는 쪽 편의일 뿐이니, 집계에서 없는 경우를 방어하지 않아도 된다.
+   */
+  source?: LogSource;
   isDetailed: boolean;
   physicalState?: string;
   emotionalState?: string;
