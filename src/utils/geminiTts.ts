@@ -12,7 +12,30 @@
 import { loadTtsBlob, saveTtsBlob } from './ttsStore';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
-const MODEL = 'gemini-3.1-flash-tts-preview';
+/**
+ * ★ 이 엔드포인트에는 **정식 출시(GA) TTS 모델이 없다.** 전부 preview 이고,
+ * preview 는 유료 Tier 1 에서도 분당 10회·하루 100회로 묶인다.
+ * (GA 인 gemini-2.5-flash-tts 는 Cloud Text-to-Speech / Vertex 쪽에만 있는데,
+ *  그건 서비스 계정 인증이 필요해서 백엔드 없는 이 앱에서는 못 쓴다.)
+ *
+ * 대신 **모델마다 할당량이 따로**라는 것을 실측으로 확인했다 —
+ * 3.1 의 하루치가 마른 상태에서 2.5 계열은 정상 응답했다.
+ * 그래서 한도가 마르면 다음 모델로 넘어간다. 하루 100회가 아니라 300회가 된다.
+ *
+ * 순서는 품질·비용 기준이다. pro 는 비싸므로 마지막에 둔다.
+ */
+const MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-2.5-pro-preview-tts',
+];
+
+/** 오늘 할당량이 마른 모델. 마르지 않은 첫 번째 모델을 쓴다. */
+const exhausted = new Set<string>();
+
+function currentModel(): string | null {
+  return MODELS.find(m => !exhausted.has(m)) ?? null;
+}
 /**
  * ⚠️ 이 값이 실제 상한이다. 호출부에서 아무리 오래 기다려도 여기서 끊기면 끝이다.
  *
@@ -184,6 +207,12 @@ export function isQuotaExhausted(): boolean {
 /** 사용자가 다시 시도하겠다고 할 때 (키를 바꿨거나 하루가 지났거나) */
 export function resetQuotaFlag(): void {
   quotaExhausted = false;
+  exhausted.clear();
+}
+
+/** 지금 쓰고 있는 모델 — 화면 안내용 */
+export function activeTtsModel(): string | null {
+  return currentModel();
 }
 
 // 말투가 다르면 같은 문장이라도 다른 오디오다 — 키에 함께 넣는다.
@@ -199,6 +228,11 @@ async function requestTts(
   // Gemini TTS 는 자연어로 말투를 지시한다. pitch 파라미터를 흔드는 것과 달리
   // 모델이 의도한 조절 방식이라 음질이 상하지 않는다.
   const prompt = style ? `${style} 말해줘: ${text}` : text;
+  const model = currentModel();
+  if (!model) {
+    warn('모든 TTS 모델의 하루 할당량이 말랐다');
+    return null;
+  }
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -206,7 +240,7 @@ async function requestTts(
       method: 'POST',
       headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         input: prompt,
         response_format: { type: 'audio' },
         generation_config: { speech_config: [{ voice }] },
@@ -222,8 +256,12 @@ async function requestTts(
       //     이걸 재시도하면 시간만 태우고, 화면에는 "서버가 바빠서"라는
       //     틀린 안내가 뜬다. 실제로 그 상태로 한참 헤맸다.
       if (/exceeded your current quota|check your plan and billing/i.test(body)) {
+        // 이 모델만 마른 것이다. 다음 모델로 즉시 넘어간다.
+        exhausted.add(model);
+        const next = currentModel();
+        warn(`${model} 할당량 소진 → ${next ?? '남은 모델 없음'}`);
+        if (next) return requestTts(text, voice, style, apiKey, retry);
         quotaExhausted = true;
-        warn('할당량 소진 — 재시도해도 소용없다', body);
         return null;
       }
       backoffUntil = Date.now() + BACKOFF_MS;
