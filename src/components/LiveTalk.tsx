@@ -295,7 +295,9 @@ function VoicePrepCard() {
       <p className="text-xs text-gray-400 mt-1 leading-relaxed">
         {allReady
           ? '다 받아뒀어요. 대화 중에는 인터넷을 쓰지 않아 목소리가 바로 나와요.'
-          : '한 번만 받아두면 대화가 끊기지 않고 목소리도 바로 나와요. 몇 분 걸려요.'}
+          : `한 번만 받아두면 대화가 끊기지 않고 목소리도 바로 나와요. `
+            + `AI 한도가 분당 10회·하루 100회라 천천히 받아요 — 남은 ${total - ready}개에 `
+            + `약 ${Math.max(1, Math.ceil((total - ready) * 6.5 / 60))}분. 하루에 다 못 받으면 내일 이어서 받으면 돼요.`}
       </p>
 
       <div className="flex items-center gap-2 mt-3">

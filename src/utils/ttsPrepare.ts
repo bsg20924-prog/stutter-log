@@ -32,22 +32,51 @@ export interface PrepareProgress {
 const GAP_MS = 300;
 
 /**
- * 과부하(500)가 흔해서 실측상 절반 가까이 실패한다. 넉넉하게 다시 시도한다.
- * 간격을 점점 늘린다 — 바쁜 서버를 같은 박자로 두드려 봐야 같이 실패한다.
+ * ★ Gemini 3.1 Flash TTS 의 실제 한도 (2026-07-30, 유료 Tier 1 콘솔 확인):
+ *
+ *     RPM(분당 요청)  10
+ *     RPD(일일 요청) 100
+ *
+ * **결제해도 풀리지 않는다** — preview 모델의 제약이다.
+ * "유료면 한도가 사라진다"고 잘못 알고 동시 요청을 늘리고 재시도를 넉넉히
+ * 잡았는데, 그 결과 70개를 받으려고 200회를 써서 하루치를 두 배로 태웠다.
+ * 여기서는 한도를 **넘지 않는 것**이 유일하게 옳은 전략이다.
  */
-const RETRY_GAPS_MS = [2000, 5000, 10000, 20000];
+const RPM_LIMIT = 10;
+
+/** 분당 10회 아래로 유지한다. 6.5초 간격이면 약 9 RPM 이다. */
+const MIN_INTERVAL_MS = Math.ceil(60_000 / (RPM_LIMIT - 1));
 
 /**
- * 동시에 받는 개수.
- *
- * 2 → 4 로 올렸다가 **되돌렸다.** 4로 두면 429 를 맞고 60초 쉰 뒤
- * 네 개가 한꺼번에 깨어나 또 429 를 맞는다. 그게 반복되면 영원히 멈춘 것처럼 보인다
- * (실제로 58/70 에서 멈췄다). 3 + 시작 시차로 그 동시 재개를 흩는다.
+ * 재시도는 딱 한 번.
+ * 시도 한 번이 일일 100회에서 그대로 차감된다 — 재시도가 곧 받을 수 있는
+ * 개수를 줄인다. 실패한 것은 내일 다시 받으면 되고, 그게 훨씬 싸다.
  */
-const CONCURRENCY = 3;
+const RETRY_GAPS_MS = [8000];
 
-/** 워커가 한꺼번에 깨어나지 않도록 시작을 어긋나게 한다. */
-const STAGGER_MS = 900;
+/**
+ * 동시 요청은 두지 않는다.
+ * 4 → 3 으로 줄여도 429 가 났다. 애초에 분당 10회 한도에서는 동시성이
+ * 이득이 아니라 초과의 원인일 뿐이다.
+ */
+const CONCURRENCY = 1;
+const STAGGER_MS = 0;
+
+// 요청 간격을 지키기 위한 마지막 요청 시각.
+let lastRequestAt = 0;
+
+/** 분당 한도를 넘지 않도록 다음 요청까지 기다린다. */
+async function pace(
+  signal: AbortSignal | undefined,
+  onWait: (seconds: number) => void,
+): Promise<void> {
+  const waitMs = lastRequestAt + MIN_INTERVAL_MS - Date.now();
+  if (waitMs > 0) {
+    onWait(Math.ceil(waitMs / 1000));
+    await sleep(waitMs, signal);
+  }
+  lastRequestAt = Date.now();
+}
 
 /**
  * 429 백오프를 기다리는 상한.
@@ -139,10 +168,17 @@ export async function prepareAllVoices(
         if (isQuotaExhausted()) break;
 
         if (attempt > 0) {
-          progress.note = `다시 시도하는 중 (${attempt}/${RETRY_GAPS_MS.length})`;
+          progress.note = '다시 시도하는 중...';
           emit();
           await sleep(RETRY_GAPS_MS[attempt - 1], signal);
         }
+
+        // ★ 분당 10회를 넘기지 않도록 간격을 지킨다.
+        await pace(signal, sec => {
+          progress.note = `한도(분당 ${RPM_LIMIT}회)에 맞춰 ${sec}초 기다리는 중...`;
+          emit();
+        });
+        if (signal?.aborted) break;
 
         // 429 중에 던지면 요청도 못 나가고 시도 횟수만 태운다.
         const until = Date.now() + MAX_BACKOFF_WAIT_MS;
