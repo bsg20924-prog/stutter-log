@@ -14,6 +14,7 @@ import { getZoneFrequency } from '../utils/phonetics';
 import { getTacticLabel } from '../data/strategies';
 import ArticulationMap from './ArticulationMap';
 import TrendSection from './TrendSection';
+import WeeklyNarrative from './WeeklyNarrative';
 
 const CHART_STYLE = { fontSize: 11, fill: '#64748b' };
 
@@ -84,7 +85,10 @@ export default function StatsPanel() {
   return (
     <div className="space-y-4">
 
-      {/* 발음 기관 히트맵 — 최상단 */}
+      {/* 이번 주 이야기 — 아래 차트들을 읽기 전에 한 주를 문장으로 먼저 훑는다 */}
+      <WeeklyNarrative entries={entries} />
+
+      {/* 발음 기관 히트맵 */}
       <ArticulationMap frequency={zoneFreq} />
 
       {/* 요약 카드 */}
