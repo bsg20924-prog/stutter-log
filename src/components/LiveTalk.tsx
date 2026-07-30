@@ -243,6 +243,7 @@ function Intro({
 function VoicePrepCard() {
   const [stat, setStat] = useState<{ ready: number; total: number } | null>(null);
   const [progress, setProgress] = useState<PrepareProgress | null>(null);
+  const [stopping, setStopping] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -264,11 +265,23 @@ function VoicePrepCard() {
     abortRef.current = controller;
     // 이미 받아둔 개수에서 이어서 센다. 0 부터 시작하면 시작하자마자
     // 숫자가 뒤로 가서 "받아둔 게 사라졌다"로 읽힌다.
-    setProgress({ done: ready, total, failed: 0 });
+    setProgress({ done: ready, total, failed: 0, active: 0, note: '확인하는 중...' });
+    setStopping(false);
     await prepareAllVoices(setProgress, controller.signal);
     abortRef.current = null;
     setProgress(null);
+    setStopping(false);
     setStat(await countPrepared());
+  }
+
+  /**
+   * 멈추기는 **즉시 화면에 반영해야 한다.**
+   * 진행 중인 요청이 끝날 때까지(최대 수십 초) 아무 반응이 없으면
+   * 버튼이 고장 난 것으로 읽힌다 — 실제로 그렇게 보였다.
+   */
+  function stop() {
+    setStopping(true);
+    abortRef.current?.abort();
   }
 
   if (!stat) return null;
@@ -295,23 +308,38 @@ function VoicePrepCard() {
         <span className="shrink-0 text-[11px] text-gray-400 tabular-nums">{ready} / {total}</span>
       </div>
 
+      {/* 지금 무슨 일이 일어나는 중인지 — 아무 표시 없이 멈춰 있으면 고장으로 읽힌다 */}
+      {progress && (
+        <p className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2 leading-relaxed">
+          {progress.active > 0 && !stopping && (
+            <Loader2 size={11} className="shrink-0 animate-spin" />
+          )}
+          <span className="min-w-0 truncate">
+            {stopping ? '멈추는 중... 받던 것만 마저 끝낼게요.' : progress.note}
+          </span>
+        </p>
+      )}
+
       {progress && progress.failed > 0 && (
-        <p className="text-[11px] text-amber-600 mt-2">
-          {progress.failed}개는 지금 서버가 바빠서 못 받았어요. 나중에 다시 누르면 그것만 받아요.
+        <p className="text-[11px] text-amber-600 mt-1">
+          {progress.failed}개는 서버가 바빠서 못 받았어요. 다시 누르면 그것만 받아요.
         </p>
       )}
 
       {!allReady && (
         <button
-          onClick={() => { if (running) abortRef.current?.abort(); else void run(); }}
+          onClick={() => { if (running) stop(); else void run(); }}
+          disabled={stopping}
           className={[
             'w-full mt-3 rounded-xl py-2.5 text-xs font-semibold transition-colors',
-            running
-              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              : 'bg-teal-500 text-white hover:bg-teal-600',
+            stopping
+              ? 'bg-gray-100 text-gray-400'
+              : running
+                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                : 'bg-teal-500 text-white hover:bg-teal-600',
           ].join(' ')}
         >
-          {running ? '그만 받기' : '받아두기'}
+          {stopping ? '멈추는 중...' : running ? '그만 받기' : '받아두기'}
         </button>
       )}
     </div>
