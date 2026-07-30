@@ -160,8 +160,11 @@ export function unlockAudioElement(): void {
   if (unlockedAudio) return;
   try {
     const el = new Audio(silentWavUrl());
-    el.volume = 0;
-    void el.play().then(() => { el.volume = 1; }).catch(() => { el.volume = 1; });
+    // ⚠️ volume 을 건드리지 않는다.
+    // 예전에는 0 으로 낮췄다가 play() 가 끝나면 1 로 되돌렸는데, 그 약속이 끝나지
+    // 않으면 **볼륨 0 인 엘리먼트를 계속 쓰게 된다** — 소리가 나는 것처럼 동작하지만
+    // 아무것도 안 들린다. 애초에 이 WAV 는 무음이라 낮출 이유가 없었다.
+    void el.play().catch(() => {});
     unlockedAudio = el;
   } catch {
     // 못 풀어도 브라우저 음성 경로는 남아 있다.
@@ -174,6 +177,13 @@ function audioForPlayback(src: string): HTMLAudioElement {
     unlockedAudio.onended = null;
     unlockedAudio.onerror = null;
     unlockedAudio.src = src;
+    // ⚠️ iOS 는 src 만 갈아끼우면 새 소스를 읽지 않는 경우가 많다.
+    // load() 를 빼먹으면 재생은 '성공'하는데 아무 소리도 안 난다.
+    try {
+      unlockedAudio.load();
+    } catch {
+      // 무시 — 아래에서 play() 가 실패하면 브라우저 음성으로 내려간다.
+    }
     return unlockedAudio;
   }
   return new Audio(src);
@@ -276,15 +286,32 @@ export function speakPrompt(
   if (ready) {
     try {
       audioEl = audioForPlayback(ready);
+
+      // ⚠️ 재생 실패를 '잘 나왔다'로 처리하면 안 된다.
+      // 예전에는 onerror/play() 실패에도 finish('spoken') 을 불렀는데,
+      // 그러면 소리가 하나도 안 났는데 화면은 멀쩡히 다음으로 넘어간다.
+      // "상대 목소리가 아예 안 들린다"가 정확히 이 모습이었다.
+      // 실패하면 브라우저 음성으로 내려간다 — 로봇 목소리가 무음보다 낫다.
+      const toBrowserVoice = () => {
+        if (finished) return;
+        try { audioEl?.pause(); } catch { /* 무시 */ }
+        if (watchdog !== null) {
+          window.clearTimeout(watchdog);
+          watchdog = null;
+        }
+        speakWithBrowserVoice();
+      };
+
       audioEl.onended = () => finish('spoken');
-      audioEl.onerror = () => finish('spoken');
-      // ⚠️ 제스처 안에서 호출되므로 play() 가 허용된다.
-      void audioEl.play().catch(() => finish('spoken'));
+      audioEl.onerror = toBrowserVoice;
+      void audioEl.play().catch(toBrowserVoice);
+
       // 재생이 끝나지 않는 경우를 대비한 안전장치.
       watchdog = window.setTimeout(() => finish('spoken'), estimateDurationMs(text) + 4000);
       return {
         cancel: () => {
           try { audioEl?.pause(); } catch { /* 무시 */ }
+          cancelSpeech();
           finish('spoken');
         },
       };
@@ -293,44 +320,7 @@ export function speakPrompt(
     }
   }
 
-  const fallback = () => {
-    playChime();
-    // 말풍선을 읽을 시간을 준 뒤 넘어간다. 즉시 넘기면 글자를 읽기도 전에 카운트다운이 시작된다.
-    watchdog = window.setTimeout(() => finish('fallback'), estimateDurationMs(text));
-  };
-
-  const voice = findKoreanVoice();
-  if (!isSpeechSupported() || !voice) {
-    fallback();
-    return { cancel: () => finish('fallback') };
-  }
-
-  try {
-    // 이전 발화가 큐에 남아 있으면 onend 순서가 꼬인다.
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.voice = voice;
-    utterance.lang = voice.lang || 'ko-KR';
-    const { rate, pitch } = prosodyFor(scenarioId);
-    utterance.rate = rate;
-    utterance.pitch = pitch;
-    utterance.onend = () => finish('spoken');
-    utterance.onerror = () => {
-      // 재생 도중 실패 — 차임으로라도 신호를 준다.
-      if (finished) return;
-      playChime();
-      finish('fallback');
-    };
-
-    window.speechSynthesis.speak(utterance);
-
-    // onend 가 오지 않는 WebKit 버그 대비. 이게 없으면 화면이 멈춘다.
-    watchdog = window.setTimeout(() => finish('spoken'), estimateDurationMs(text));
-  } catch {
-    fallback();
-  }
-
+  speakWithBrowserVoice();
   return {
     cancel: () => {
       try {
@@ -341,6 +331,47 @@ export function speakPrompt(
       finish('fallback');
     },
   };
+
+  // 함수 선언이라 위에서도 부를 수 있다 (오디오 재생이 실패했을 때의 대체 경로).
+  function speakWithBrowserVoice(): void {
+    const fallback = () => {
+      playChime();
+      // 말풍선을 읽을 시간을 준 뒤 넘어간다. 즉시 넘기면 글자를 읽기도 전에 카운트다운이 시작된다.
+      watchdog = window.setTimeout(() => finish('fallback'), estimateDurationMs(text));
+    };
+
+    const voice = findKoreanVoice();
+    if (!isSpeechSupported() || !voice) {
+      fallback();
+      return;
+    }
+
+    try {
+      // 이전 발화가 큐에 남아 있으면 onend 순서가 꼬인다.
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.voice = voice;
+      utterance.lang = voice.lang || 'ko-KR';
+      const { rate, pitch } = prosodyFor(scenarioId);
+      utterance.rate = rate;
+      utterance.pitch = pitch;
+      utterance.onend = () => finish('spoken');
+      utterance.onerror = () => {
+        // 재생 도중 실패 — 차임으로라도 신호를 준다.
+        if (finished) return;
+        playChime();
+        finish('fallback');
+      };
+
+      window.speechSynthesis.speak(utterance);
+
+      // onend 가 오지 않는 WebKit 버그 대비. 이게 없으면 화면이 멈춘다.
+      watchdog = window.setTimeout(() => finish('spoken'), estimateDurationMs(text));
+    } catch {
+      fallback();
+    }
+  }
 }
 
 /** 화면을 벗어날 때 남은 발화를 정리한다. */
