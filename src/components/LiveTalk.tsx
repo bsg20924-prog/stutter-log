@@ -30,7 +30,9 @@ import {
   useSpeechRecognition, isSpeechRecognitionSupported,
 } from '../hooks/useSpeechRecognition';
 import { checkAmbientAvailable, createAmbientPlayer, AmbientPlayer } from '../utils/ambient';
-import { countPrepared, prepareAllVoices, PrepareProgress } from '../utils/ttsPrepare';
+import {
+  countPrepared, prepareAllVoices, testStoredVoice, PrepareProgress,
+} from '../utils/ttsPrepare';
 
 /**
  * 내 차례의 길이. 상황 시뮬레이션(8초)보다 길게 잡는다 —
@@ -246,6 +248,7 @@ function VoicePrepCard() {
   const [stopping, setStopping] = useState(false);
   // 받기가 끝난 뒤에도 남겨 두는 결과 — 왜 다 못 받았는지 사라지면 안 된다.
   const [lastResult, setLastResult] = useState<PrepareProgress | null>(null);
+  const [soundTest, setSoundTest] = useState<string>('');
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -352,6 +355,28 @@ function VoicePrepCard() {
         <p className="text-[11px] text-amber-600 mt-1">
           {progress.failed}개는 서버가 바빠서 못 받았어요. 다시 누르면 그것만 받아요.
         </p>
+      )}
+
+      {/*
+        소리가 안 난다는 신고가 기기 쪽인지 앱 쪽인지 가르는 버튼.
+        API 를 쓰지 않고 저장된 음성 하나를 그대로 튼다.
+      */}
+      {stat.ready > 0 && !running && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <button
+            onClick={() => {
+              primeAudio();                 // 제스처 안에서 오디오 잠금부터 푼다
+              setSoundTest('재생하는 중...');
+              void testStoredVoice().then(setSoundTest);
+            }}
+            className="text-[11px] font-medium text-teal-600 underline underline-offset-2"
+          >
+            소리 테스트
+          </button>
+          {soundTest && (
+            <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">{soundTest}</p>
+          )}
+        </div>
       )}
 
       {!allReady && (

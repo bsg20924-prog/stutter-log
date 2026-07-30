@@ -12,7 +12,7 @@
 
 import { allScenarioLines } from './liveConversation';
 import {
-  ensureTts, hasStoredTts, isBackingOff, isQuotaExhausted, resetQuotaFlag,
+  ensureTts, hasStoredTts, isBackingOff, isQuotaExhausted, resetQuotaFlag, loadStoredBlob,
 } from './geminiTts';
 import { getGeminiKey } from './gemini';
 
@@ -97,6 +97,37 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     signal?.addEventListener('abort', done);
   });
+}
+
+/**
+ * 저장된 음성 하나를 그대로 재생해 본다 — API 를 쓰지 않는다.
+ *
+ * "소리가 아예 안 난다"는 신고가 기기 쪽(무음 스위치·볼륨)인지 앱 쪽(재생 경로)인지
+ * 가르는 것이 목적이다. 그 둘을 구분 못 해서 한참 헤맸다.
+ * ⚠️ 반드시 사용자 터치 안에서 호출할 것.
+ */
+export async function testStoredVoice(): Promise<string> {
+  const first = allScenarioLines()[0];
+  if (!first) return '테스트할 대사가 없어요.';
+
+  const blob = await loadStoredBlob(first.line, first.scenarioId);
+  if (!blob) return '저장된 음성이 없어요. 먼저 받아두기를 눌러 주세요.';
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const el = new Audio(url);
+    await el.play();
+    // 실제로 흐르고 있는지 본다. play() 가 성공해도 무음일 수 있다.
+    await new Promise(r => window.setTimeout(r, 700));
+    if (el.currentTime > 0.1) {
+      return `소리가 나야 정상이에요. ("${first.line}") 안 들렸다면 기기 무음 스위치나 볼륨을 확인해 주세요.`;
+    }
+    return '재생이 시작되지 않았어요. 앱을 완전히 닫았다 다시 열어 주세요.';
+  } catch (e) {
+    return `재생이 막혔어요: ${String(e).slice(0, 80)}`;
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
 }
 
 /** 이미 몇 개가 준비돼 있는지. 진행률 표시용. */

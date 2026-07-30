@@ -354,6 +354,11 @@ export async function generateTts(
 // 대화 도중에 음성을 만드는 것은 성립하지 않는다(모듈 상단 주석 참고).
 // 고정 대사는 미리 한 번만 받아 영구 보관하고, 그 뒤로는 네트워크를 타지 않는다.
 
+/** 보관된 음성 원본. 소리 테스트처럼 재생 경로를 직접 확인할 때 쓴다. */
+export function loadStoredBlob(text: string, scenarioId?: string): Promise<Blob | null> {
+  return loadTtsBlob(cacheKey(text, voiceForScenario(scenarioId), styleForScenario(scenarioId)));
+}
+
 /** 이 대사의 음성이 이미 보관돼 있는지. */
 export async function hasStoredTts(text: string, scenarioId?: string): Promise<boolean> {
   const key = cacheKey(text, voiceForScenario(scenarioId), styleForScenario(scenarioId));
