@@ -20,6 +20,7 @@ import ChallengeList from './components/ChallengeList';
 import SoundMapPanel from './components/SoundMapPanel';
 import SoundMapTest from './components/SoundMapTest';
 import SimulationTest from './components/SimulationTest';
+import LiveTalk from './components/LiveTalk';
 import InstallPrompt from './components/InstallPrompt';
 import './index.css';
 
@@ -38,14 +39,15 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('record');
   const [showSoundMap, setShowSoundMap] = useState(false);
   const [showSimulation, setShowSimulation] = useState(false);
+  const [showLiveTalk, setShowLiveTalk] = useState(false);
   const { addEntry, loading } = useLogStore();
   const [updateReady, setUpdateReady] = useState(false);
 
-  // 검사/시뮬레이션이 열려 있는 동안에는 자동 새로고침을 막는다 —
-  // 응답이 메모리에만 있어서 중간에 새로고침되면 진행이 통째로 날아간다.
+  // 검사/시뮬레이션/대화가 열려 있는 동안에는 자동 새로고침을 막는다 —
+  // 진행 상태가 메모리에만 있어서 중간에 새로고침되면 통째로 날아간다.
   useEffect(() => {
-    blockReload(showSoundMap || showSimulation);
-  }, [showSoundMap, showSimulation]);
+    blockReload(showSoundMap || showSimulation || showLiveTalk);
+  }, [showSoundMap, showSimulation, showLiveTalk]);
 
   useEffect(() => onUpdatePending(setUpdateReady), []);
   // 소리 지도를 한 번도 만들지 않은 사용자에게만 기록 탭 상단 유도 카드를 띄운다.
@@ -107,6 +109,7 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
             <SoundMapPanel
               onStart={() => setShowSoundMap(true)}
               onStartSimulation={() => setShowSimulation(true)}
+              onStartLiveTalk={() => setShowLiveTalk(true)}
             />
           )}
           {activeTab === 'stats'     && <StatsPanel />}
@@ -133,6 +136,16 @@ function AppShell({ onSignOut }: { onSignOut: () => void }) {
           onStartSoundMap={() => {
             setShowSimulation(false);
             setShowSoundMap(true);
+          }}
+        />
+      )}
+
+      {/* ── 살아있는 대화 (전체 화면) ── */}
+      {showLiveTalk && (
+        <LiveTalk
+          onClose={() => {
+            setShowLiveTalk(false);
+            setActiveTab('soundmap');
           }}
         />
       )}

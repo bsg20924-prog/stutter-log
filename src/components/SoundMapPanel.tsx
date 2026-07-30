@@ -4,7 +4,9 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { RefreshCw, Map as MapIcon, Drama, ChevronRight, Clock } from 'lucide-react';
+import {
+  RefreshCw, Map as MapIcon, Drama, MessagesSquare, ChevronRight, Clock,
+} from 'lucide-react';
 import {
   useLatestSoundMap, saveSoundMapResult, clearLocalSoundMaps,
 } from '../hooks/useSoundMaps';
@@ -16,10 +18,11 @@ import SoundMapResultView from './SoundMapResultView';
 import SimulationResultView from './SimulationResultView';
 
 export default function SoundMapPanel({
-  onStart, onStartSimulation,
+  onStart, onStartSimulation, onStartLiveTalk,
 }: {
   onStart: () => void;
   onStartSimulation: () => void;
+  onStartLiveTalk: () => void;
 }) {
   const { latest, loading } = useLatestSoundMap();
   const { runs } = useSimulationRuns();
@@ -56,6 +59,17 @@ export default function SoundMapPanel({
             ? '최근 소리 지도에 비춰 상황 탓인지 소리 탓인지 가려드려요.'
             : '지도가 없어도 할 수 있어요. 다만 원인 분석은 지도가 있어야 해요.'}
           onClick={onStartSimulation}
+        />
+        {/*
+          사다리 위의 칸 — 여기부터는 말할 문장이 주어지지 않는다.
+          측정이 아니라 노출이므로 소리 지도 점수와 섞지 않는다.
+        */}
+        <ModeCard
+          icon={<MessagesSquare size={20} />}
+          title="살아있는 대화"
+          desc="말할 문장 없이, 상대가 내 대답을 받아 다음 말을 해요. 2~3분."
+          note="다음에 무슨 말이 올지 모르는 것 — 그게 실전 압박의 핵심이에요."
+          onClick={onStartLiveTalk}
         />
       </div>
 
