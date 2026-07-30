@@ -118,6 +118,65 @@ function getAudioContext(): AudioContext | null {
 export function primeAudio(): void {
   const ctx = getAudioContext();
   if (ctx && ctx.state === 'suspended') void ctx.resume().catch(() => {});
+  unlockAudioElement();
+}
+
+// ── 제스처 밖에서도 오디오를 틀기 위한 공용 엘리먼트 ──────────────
+//
+// 상황 시뮬레이션은 카드마다 「시작」을 누르므로 재생이 항상 제스처 안에서 일어난다.
+// 살아있는 대화는 다르다 — 상대의 다음 말은 Gemini 응답을 await 한 뒤에 나오므로
+// 제스처 컨텍스트가 이미 끊겨 있다. iOS 는 그 시점의 new Audio().play() 를 막는다.
+//
+// 해결: 첫 터치에서 **엘리먼트 하나를 무음으로 재생해 잠금을 풀어 두고**,
+// 이후에는 그 엘리먼트의 src 만 갈아 끼운다. 한 번 풀린 엘리먼트는 계속 쓸 수 있다.
+let unlockedAudio: HTMLAudioElement | null = null;
+
+/** 0.05초짜리 무음 WAV — 파일 없이 만들어 CSP 에 걸리지 않는다. */
+function silentWavUrl(): string {
+  const samples = 1200;                       // 24kHz 기준 0.05초
+  const buf = new ArrayBuffer(44 + samples * 2);
+  const v = new DataView(buf);
+  const wr = (o: number, s: string) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  wr(0, 'RIFF');
+  v.setUint32(4, 36 + samples * 2, true);
+  wr(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, 24000, true);
+  v.setUint32(28, 24000 * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  wr(36, 'data');
+  v.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+/**
+ * ⚠️ 반드시 사용자 터치 핸들러 안에서 동기적으로 호출할 것.
+ * 이후의 모든 오디오 재생이 이 한 번에 달려 있다.
+ */
+export function unlockAudioElement(): void {
+  if (unlockedAudio) return;
+  try {
+    const el = new Audio(silentWavUrl());
+    el.volume = 0;
+    void el.play().then(() => { el.volume = 1; }).catch(() => { el.volume = 1; });
+    unlockedAudio = el;
+  } catch {
+    // 못 풀어도 브라우저 음성 경로는 남아 있다.
+  }
+}
+
+/** 잠금이 풀린 공용 엘리먼트. 없으면 새로 만든다(제스처 안이라면 그대로 동작한다). */
+function audioForPlayback(src: string): HTMLAudioElement {
+  if (unlockedAudio) {
+    unlockedAudio.onended = null;
+    unlockedAudio.onerror = null;
+    unlockedAudio.src = src;
+    return unlockedAudio;
+  }
+  return new Audio(src);
 }
 
 /** 짧은 2음 차임. TTS 를 못 쓸 때 "상대가 말했다"는 신호를 귀로도 준다. */
@@ -216,7 +275,7 @@ export function speakPrompt(
   const ready = getReadyTts(text, scenarioId);
   if (ready) {
     try {
-      audioEl = new Audio(ready);
+      audioEl = audioForPlayback(ready);
       audioEl.onended = () => finish('spoken');
       audioEl.onerror = () => finish('spoken');
       // ⚠️ 제스처 안에서 호출되므로 play() 가 허용된다.
