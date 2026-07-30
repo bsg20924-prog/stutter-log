@@ -140,6 +140,73 @@ function extractText(data: InteractionResponse): string {
   return chunks.join('');
 }
 
+// ── 공용 호출 ─────────────────────────────────────────────
+/**
+ * Interactions API 를 한 번 호출하고 본문 텍스트를 돌려준다.
+ *
+ * ⚠️ 실패는 전부 null 이다 — 예외를 던지지 않는다.
+ * 이 모듈의 모든 기능은 '덧붙이는 층'이고, 호출부는 키가 없거나 네트워크가
+ * 끊긴 상태에서도 자기 폴백으로 계속 동작해야 한다.
+ */
+export async function callGemini(opts: {
+  input: string;
+  systemInstruction?: string;
+  /** 주면 JSON 모드로 부른다. 응답 텍스트는 이 스키마를 따르는 JSON 이다. */
+  schema?: unknown;
+  temperature?: number;
+  thinkingLevel?: 'minimal' | 'low' | 'high';
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}): Promise<string | null> {
+  const key = getGeminiKey();
+  if (!key || !opts.input) return null;
+
+  // 자체 타임아웃 — 응답이 안 오면 화면을 붙잡지 않고 폴백으로 넘어간다.
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), opts.timeoutMs ?? TIMEOUT_MS);
+  const onOuterAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onOuterAbort);
+
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        ...(opts.systemInstruction ? { system_instruction: opts.systemInstruction } : {}),
+        input: opts.input,
+        generation_config: {
+          ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+          ...(opts.thinkingLevel ? { thinking_level: opts.thinkingLevel } : {}),
+        },
+        ...(opts.schema
+          ? { response_format: { type: 'text', mime_type: 'application/json', schema: opts.schema } }
+          : {}),
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const text = extractText((await res.json()) as InteractionResponse);
+    return text || null;
+  } catch {
+    // 네트워크 실패·타임아웃·JSON 깨짐 — 전부 조용히 포기한다.
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onOuterAbort);
+  }
+}
+
+/** callGemini 의 JSON 응답을 파싱한다. 깨져 있으면 null. */
+export function parseGeminiJson<T>(text: string | null): T | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 // ── 문장 생성 ─────────────────────────────────────────────
 export interface SentenceRequestScenario {
   id: string;
@@ -232,8 +299,7 @@ export async function generateSituationSentences(
   scenarios: SentenceRequestScenario[],
   signal?: AbortSignal,
 ): Promise<GeneratedSentence[] | null> {
-  const key = getGeminiKey();
-  if (!key || words.length === 0 || scenarios.length === 0) return null;
+  if (words.length === 0 || scenarios.length === 0) return null;
 
   const scenarioList = scenarios
     .map(s => [
@@ -258,79 +324,43 @@ export async function generateSituationSentences(
     ...words.map(w => `- ${w}`),
   ].join('\n');
 
-  // 자체 타임아웃 — 응답이 안 오면 검사를 붙잡지 않고 템플릿으로 넘어간다.
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const onOuterAbort = () => controller.abort();
-  signal?.addEventListener('abort', onOuterAbort);
+  const parsed = parseGeminiJson<{ sentences?: unknown }>(await callGemini({
+    systemInstruction: SYSTEM_INSTRUCTION,
+    input,
+    schema: RESPONSE_SCHEMA,
+    temperature: 0.9,
+    // minimal 로 두면 단어를 끼워 넣으려고 억지 설정을 지어내는 일이 잦았다.
+    // low 는 그보다 자연스럽고, 인트로에서 미리 생성하므로 지연은 체감되지 않는다.
+    thinkingLevel: 'low',
+    signal,
+  }));
+  if (!parsed || !Array.isArray(parsed.sentences)) return null;
 
-  try {
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': key,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        system_instruction: SYSTEM_INSTRUCTION,
-        input,
-        generation_config: {
-          temperature: 0.9,
-          // minimal 로 두면 단어를 끼워 넣으려고 억지 설정을 지어내는 일이 잦았다.
-          // low 는 그보다 자연스럽고, 인트로에서 미리 생성하므로 지연은 체감되지 않는다.
-          thinking_level: 'low',
-        },
-        response_format: {
-          type: 'text',
-          mime_type: 'application/json',
-          schema: RESPONSE_SCHEMA,
-        },
-      }),
-      signal: controller.signal,
-    });
+  const validIds = new Set(scenarios.map(s => s.id));
+  const wanted = new Set(words.map(w => w.trim().toLowerCase()));
 
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as InteractionResponse;
-    const text = extractText(data);
-    if (!text) return null;
-
-    const parsed = JSON.parse(text) as { sentences?: unknown };
-    if (!Array.isArray(parsed.sentences)) return null;
-
-    const validIds = new Set(scenarios.map(s => s.id));
-    const wanted = new Set(words.map(w => w.trim().toLowerCase()));
-
-    // 모델이 단어를 바꿔치기하거나 없는 상황 id 를 지어내면 그 항목만 버린다.
-    // 검증 없이 받으면 "측정 대상 단어가 문장에 없는" 카드가 생겨 결과가 조용히 오염된다.
-    const out: GeneratedSentence[] = [];
-    for (const raw of parsed.sentences) {
-      if (!raw || typeof raw !== 'object') continue;
-      const r = raw as Record<string, unknown>;
-      const word = String(r.word ?? '').trim();
-      const scenarioId = String(r.scenarioId ?? '').trim();
-      const sentence = String(r.text ?? '').trim();
-      const prompt = String(r.prompt ?? '').trim();
-      if (!word || !sentence) continue;
-      if (!validIds.has(scenarioId)) continue;
-      if (!wanted.has(word.toLowerCase())) continue;
-      // ★ 검사 단어가 문장 **맨 앞**에 와야 한다.
-      // 말막힘은 발화를 시작하는 순간에 일어나므로, 단어 앞에 다른 말이 붙으면
-      // 그 단어 때문에 막혔는지 판별할 수 없다 — 그 카드의 4단계는 측정 자체가 무의미해진다.
-      // 지시문만으로는 모델이 어길 수 있으므로 여기서 반드시 거른다(걸러진 카드는 템플릿을 쓴다).
-      if (!sentence.toLowerCase().startsWith(word.toLowerCase())) continue;
-      // 멘트는 없거나 지나치게 길면 버린다(호출부가 고정 멘트로 대체한다).
-      out.push({ word, scenarioId, prompt: prompt.length <= 60 ? prompt : '', text: sentence });
-    }
-    return out.length > 0 ? out : null;
-  } catch {
-    // 네트워크 실패·타임아웃·JSON 깨짐 — 전부 조용히 포기한다.
-    return null;
-  } finally {
-    window.clearTimeout(timer);
-    signal?.removeEventListener('abort', onOuterAbort);
+  // 모델이 단어를 바꿔치기하거나 없는 상황 id 를 지어내면 그 항목만 버린다.
+  // 검증 없이 받으면 "측정 대상 단어가 문장에 없는" 카드가 생겨 결과가 조용히 오염된다.
+  const out: GeneratedSentence[] = [];
+  for (const raw of parsed.sentences) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    const word = String(r.word ?? '').trim();
+    const scenarioId = String(r.scenarioId ?? '').trim();
+    const sentence = String(r.text ?? '').trim();
+    const prompt = String(r.prompt ?? '').trim();
+    if (!word || !sentence) continue;
+    if (!validIds.has(scenarioId)) continue;
+    if (!wanted.has(word.toLowerCase())) continue;
+    // ★ 검사 단어가 문장 **맨 앞**에 와야 한다.
+    // 말막힘은 발화를 시작하는 순간에 일어나므로, 단어 앞에 다른 말이 붙으면
+    // 그 단어 때문에 막혔는지 판별할 수 없다 — 그 카드의 4단계는 측정 자체가 무의미해진다.
+    // 지시문만으로는 모델이 어길 수 있으므로 여기서 반드시 거른다(걸러진 카드는 템플릿을 쓴다).
+    if (!sentence.toLowerCase().startsWith(word.toLowerCase())) continue;
+    // 멘트는 없거나 지나치게 길면 버린다(호출부가 고정 멘트로 대체한다).
+    out.push({ word, scenarioId, prompt: prompt.length <= 60 ? prompt : '', text: sentence });
   }
+  return out.length > 0 ? out : null;
 }
 
 /** 키가 실제로 동작하는지 확인 (설정 화면의 '연결 확인'). */
